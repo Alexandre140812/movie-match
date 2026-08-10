@@ -1,1355 +1,1399 @@
-import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+};
 
-import '../models/content.dart';
-import '../services/favorites_service.dart';
-import '../services/tmdb_service.dart';
+const GENRES = {
+  "Ação": 28,
+  "Aventura": 12,
+  "Animação": 16,
+  "Comédia": 35,
+  "Crime": 80,
+  "Documentário": 99,
+  "Drama": 18,
+  "Família": 10751,
+  "Fantasia": 14,
+  "História": 36,
+  "Terror": 27,
+  "Música": 10402,
+  "Mistério": 9648,
+  "Romance": 10749,
+  "Ficção": 878,
+  "Suspense": 53,
+  "Guerra": 10752,
+  "Faroeste": 37,
+};
 
-class DetailsPage extends StatefulWidget {
-  final Content content;
+const MOODS = {
+  "Divertido": [35, 16, 10751],
+  "Emocionante": [18, 12, 10749],
+  "Tenso": [53, 27, 80, 28],
+  "Relaxante": [35, 10751, 16, 10749],
+  "Misterioso": [9648, 53, 80],
+  "Inspirador": [18, 36, 99, 10402],
+};
 
-  const DetailsPage({
-    super.key,
-    required this.content,
+const FEATURES = {
+  "História": [18, 36, 9648],
+  "Ação": [28, 12],
+  "Personagens": [18, 35, 10749],
+  "Humor": [35, 16],
+  "Visual": [878, 14, 16, 12],
+  "Suspense": [53, 9648, 27],
+  "Música": [10402],
+};
+
+const COMPANY = {
+  "Família": [10751, 16, 35, 12],
+  "Amigos": [28, 35, 27, 12, 16],
+  "Casal": [10749, 35, 18],
+};
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      ...CORS,
+      "Content-Type": "application/json; charset=utf-8",
+    },
   });
-
-  @override
-  State<DetailsPage> createState() => _DetailsPageState();
 }
 
-class _DetailsPageState extends State<DetailsPage> {
-  late Content movie;
+function normalize(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
-  bool loadingDetails = false;
-  String? detailsError;
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
 
-  Map<String, dynamic>? watchData;
+function ids(movie) {
+  return Array.isArray(movie?.genre_ids)
+    ? movie.genre_ids
+        .map(Number)
+        .filter(Number.isFinite)
+    : [];
+}
 
-  // ===========================================================
-  // LINKS OFICIAIS DOS STREAMINGS
-  // Usados principalmente pelos 4 filmes cadastrados manualmente.
-  // ===========================================================
+function shares(first, second) {
+  const set = new Set(first);
 
-  final Map<String, String> streamingLinks = {
-    'Netflix': 'https://www.netflix.com/br/',
-    'Prime Video': 'https://www.primevideo.com/',
-    'Disney+': 'https://www.disneyplus.com/pt-br',
-    'HBO Max': 'https://www.hbomax.com/br/pt',
-    'Max': 'https://www.hbomax.com/br/pt',
-    'Globoplay': 'https://globoplay.globo.com/',
-    'Apple TV+': 'https://tv.apple.com/br',
-    'Apple TV': 'https://tv.apple.com/br',
-    'Paramount+': 'https://www.paramountplus.com/br/',
-    'Crunchyroll': 'https://www.crunchyroll.com/pt-br/',
-    'Universal+': 'https://universalplus.com.br/',
-    'Claro tv+': 'https://www.clarotvmais.com.br/',
-  };
+  return second.some(
+    (value) => set.has(value),
+  );
+}
 
-  @override
-  void initState() {
-    super.initState();
+function yearOf(movie) {
+  const date = String(
+    movie?.release_date ?? "",
+  );
 
-    movie = widget.content;
+  return date.length >= 4
+    ? Number(date.slice(0, 4)) || 0
+    : 0;
+}
 
-    // Filmes vindos da TMDB possuem ID.
-    // Nesse caso buscamos duração, classificação, trailer e onde assistir.
-    if (widget.content.tmdbId != null) {
-      _loadTmdbDetails();
+function formatCertification(data) {
+  const br = data?.results?.find(
+    (item) =>
+      item.iso_3166_1 === "BR",
+  );
+
+  if (
+    !br ||
+    !Array.isArray(br.release_dates)
+  ) {
+    return "Não informada";
+  }
+
+  const order = [3, 4, 6, 2, 1, 5];
+
+  let value = "";
+
+  for (const type of order) {
+    const found =
+      br.release_dates.find(
+        (item) =>
+          item.type === type &&
+          typeof item.certification ===
+            "string" &&
+          item.certification.trim(),
+      );
+
+    if (found) {
+      value =
+        found.certification.trim();
+
+      break;
     }
   }
 
-  // ===========================================================
-  // CARREGA DETALHES COMPLETOS DA TMDB
-  // ===========================================================
+  if (!value) {
+    value =
+      br.release_dates.find(
+        (item) =>
+          typeof item.certification ===
+            "string" &&
+          item.certification.trim(),
+      )?.certification?.trim() ?? "";
+  }
 
-  Future<void> _loadTmdbDetails() async {
-    final id = widget.content.tmdbId;
+  if (!value) {
+    return "Não informada";
+  }
 
-    if (id == null) {
-      return;
-    }
+  if (
+    value.toUpperCase() === "L"
+  ) {
+    return "Livre";
+  }
 
-    setState(() {
-      loadingDetails = true;
-      detailsError = null;
-    });
+  if (/^\d+$/.test(value)) {
+    return `${value} anos`;
+  }
 
-    try {
-      final details = await TmdbService.getMovieDetails(id);
+  return value;
+}
 
-      final rawGenres = details['genres'];
+function trailerUrl(data) {
+  const list =
+    Array.isArray(data?.results)
+      ? data.results
+      : [];
 
-      final genres = <String>[];
+  const youtube =
+    list.filter(
+      (item) =>
+        item.site === "YouTube" &&
+        typeof item.key === "string" &&
+        item.key,
+    );
 
-      if (rawGenres is List) {
-        for (final genre in rawGenres) {
-          final text = genre?.toString().trim() ?? '';
+  const chosen =
+    youtube.find(
+      (item) =>
+        item.type === "Trailer" &&
+        item.official,
+    ) ??
+    youtube.find(
+      (item) =>
+        item.type === "Trailer",
+    ) ??
+    youtube.find(
+      (item) =>
+        item.type === "Teaser",
+    ) ??
+    youtube[0];
 
-          if (text.isNotEmpty) {
-            genres.add(text);
-          }
-        }
-      }
+  return chosen
+    ? `https://www.youtube.com/watch?v=${chosen.key}`
+    : "";
+}
 
-      final rawWatch = details['watch'];
+function providers(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
 
-      final Map<String, dynamic> parsedWatch = rawWatch is Map
-          ? Map<String, dynamic>.from(rawWatch)
-          : <String, dynamic>{};
+  return list.map(
+    (item) => ({
+      id:
+        item.provider_id,
 
-      final providerNames = _providerNames(parsedWatch['streaming']);
+      name:
+        item.provider_name,
 
-      final title = _textOrFallback(
-        details['title'],
-        widget.content.name,
-      );
+      logo:
+        item.logo_path
+          ? `https://image.tmdb.org/t/p/w185${item.logo_path}`
+          : "",
+    }),
+  );
+}
 
-      final overview = _textOrFallback(
-        details['overview'],
-        widget.content.description,
-      );
+function providerMatches(
+  selectedName,
+  providerName,
+) {
+  const selected =
+    normalize(selectedName);
 
-      final poster = _textOrFallback(
-        details['poster'],
-        widget.content.image,
-      );
+  const provider =
+    normalize(providerName);
 
-      final trailer = _textOrFallback(
-        details['trailer'],
-        widget.content.trailer,
-      );
+  if (
+    !selected ||
+    selected === "outro"
+  ) {
+    return false;
+  }
 
-      final certification = _textOrFallback(
-        details['certification'],
-        widget.content.ageRating,
-      );
+  if (selected === "netflix") {
+    return provider.includes(
+      "netflix",
+    );
+  }
 
-      final year = _intOrFallback(
-        details['year'],
-        widget.content.year,
-      );
+  if (
+    selected === "prime video"
+  ) {
+    return (
+      provider.includes(
+        "amazon prime video",
+      ) ||
+      provider.includes(
+        "prime video",
+      )
+    );
+  }
 
-      final rating = _doubleOrFallback(
-        details['rating'],
-        widget.content.rating,
-      );
+  if (selected === "disney+") {
+    return (
+      provider.includes(
+        "disney plus",
+      ) ||
+      provider.includes(
+        "disney+",
+      )
+    );
+  }
 
-      final runtime = TmdbService.formatRuntime(
-        details['runtime'],
-      );
+  if (
+    selected === "hbo max" ||
+    selected === "max"
+  ) {
+    return (
+      provider === "max" ||
+      provider.includes(
+        "hbo max",
+      )
+    );
+  }
 
-      final genreText = genres.isNotEmpty
-          ? genres.join(' • ')
-          : widget.content.genre;
+  if (
+    selected === "globoplay"
+  ) {
+    return provider.includes(
+      "globoplay",
+    );
+  }
 
-      final updatedMovie = Content(
-        tmdbId: id,
-        name: title,
-        genre: genreText,
-        year: year,
-        rating: rating,
-        duration: runtime,
-        ageRating: certification,
-        description: overview,
-        image: poster,
-        trailer: trailer,
-        moods: widget.content.moods,
-        streamings: providerNames,
-        features: widget.content.features,
-      );
+  if (
+    selected === "apple tv+"
+  ) {
+    return (
+      provider.includes(
+        "apple tv plus",
+      ) ||
+      provider.includes(
+        "apple tv+",
+      )
+    );
+  }
 
-      if (!mounted) {
-        return;
-      }
+  if (
+    selected === "paramount+"
+  ) {
+    return (
+      provider.includes(
+        "paramount plus",
+      ) ||
+      provider.includes(
+        "paramount+",
+      )
+    );
+  }
 
-      setState(() {
-        movie = updatedMovie;
-        watchData = parsedWatch;
-        loadingDetails = false;
-        detailsError = null;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
+  if (
+    selected === "crunchyroll"
+  ) {
+    return provider.includes(
+      "crunchyroll",
+    );
+  }
 
-      setState(() {
-        loadingDetails = false;
-        detailsError = error.toString();
-      });
+  if (
+    selected === "universal+"
+  ) {
+    return (
+      provider.includes(
+        "universal+",
+      ) ||
+      provider.includes(
+        "universal plus",
+      )
+    );
+  }
+
+  if (
+    selected === "claro tv+"
+  ) {
+    return (
+      provider.includes(
+        "claro tv",
+      ) ||
+      provider.includes(
+        "claro video",
+      )
+    );
+  }
+
+  return provider.includes(
+    selected,
+  );
+}
+
+function scoreMovie(
+  movie,
+  answers,
+) {
+  const movieGenres =
+    ids(movie);
+
+  let points = 0;
+  let max = 0;
+
+  const wantedGenre =
+    GENRES[answers.genre];
+
+  if (wantedGenre) {
+    max += 30;
+
+    if (
+      movieGenres.includes(
+        wantedGenre,
+      )
+    ) {
+      points += 30;
     }
   }
 
-  // ===========================================================
-  // CONVERSÕES
-  // ===========================================================
+  if (
+    MOODS[answers.mood]
+  ) {
+    max += 20;
 
-  String _textOrFallback(dynamic value, String fallback) {
-    final text = value?.toString().trim() ?? '';
-
-    if (text.isEmpty) {
-      return fallback;
-    }
-
-    return text;
-  }
-
-  int _intOrFallback(dynamic value, int fallback) {
-    if (value is int) {
-      return value;
-    }
-
-    return int.tryParse(value?.toString() ?? '') ?? fallback;
-  }
-
-  double _doubleOrFallback(dynamic value, double fallback) {
-    if (value is num) {
-      return value.toDouble();
-    }
-
-    return double.tryParse(value?.toString() ?? '') ?? fallback;
-  }
-
-  List<String> _providerNames(dynamic rawList) {
-    final names = <String>[];
-
-    if (rawList is! List) {
-      return names;
-    }
-
-    for (final item in rawList) {
-      if (item is Map) {
-        final name = item['name']?.toString().trim() ?? '';
-
-        if (name.isNotEmpty && !names.contains(name)) {
-          names.add(name);
-        }
-      }
-    }
-
-    return names;
-  }
-
-  List<Map<String, dynamic>> _providerList(String key) {
-    final rawList = watchData?[key];
-
-    if (rawList is! List) {
-      return [];
-    }
-
-    final providers = <Map<String, dynamic>>[];
-
-    for (final item in rawList) {
-      if (item is Map) {
-        providers.add(
-          Map<String, dynamic>.from(item),
-        );
-      }
-    }
-
-    return providers;
-  }
-
-  // ===========================================================
-  // FAVORITO
-  // ===========================================================
-
-  bool get isFavorite {
-    return FavoritesService.favorites.contains(widget.content);
-  }
-
-  void _toggleFavorite() {
-    setState(() {
-      if (isFavorite) {
-        FavoritesService.favorites.remove(widget.content);
-      } else {
-        FavoritesService.favorites.add(widget.content);
-      }
-    });
-  }
-
-  // ===========================================================
-  // ABRIR LINK
-  // ===========================================================
-
-  Future<void> _openLink(String url) async {
-    if (url.trim().isEmpty) {
-      _showLinkError();
-      return;
-    }
-
-    final uri = Uri.tryParse(url);
-
-    if (uri == null) {
-      _showLinkError();
-      return;
-    }
-
-    try {
-      final opened = await launchUrl(
-        uri,
-        mode: LaunchMode.platformDefault,
-        webOnlyWindowName: '_blank',
-      );
-
-      if (!opened && mounted) {
-        _showLinkError();
-      }
-    } catch (_) {
-      if (mounted) {
-        _showLinkError();
-      }
+    if (
+      shares(
+        movieGenres,
+        MOODS[answers.mood],
+      )
+    ) {
+      points += 20;
     }
   }
 
-  void _showLinkError() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Não foi possível abrir esse link.'),
+  if (
+    answers.era &&
+    answers.era !== "Tanto faz"
+  ) {
+    max += 15;
+
+    const year =
+      yearOf(movie);
+
+    const now =
+      new Date().getFullYear();
+
+    if (
+      (
+        answers.era ===
+          "Lançamentos" &&
+        year >= now - 3
+      ) ||
+      (
+        answers.era ===
+          "Recentes" &&
+        year >= now - 15
+      ) ||
+      (
+        answers.era ===
+          "Clássicos" &&
+        year > 0 &&
+        year < now - 15
+      )
+    ) {
+      points += 15;
+    }
+  }
+
+  if (
+    answers.streamingFilterApplied
+  ) {
+    max += 20;
+    points += 20;
+  }
+
+  if (
+    answers.duration &&
+    answers.duration !==
+      "Tanto faz"
+  ) {
+    max += 15;
+
+    if (
+      answers.durationFilterApplied
+    ) {
+      points += 15;
+    }
+  }
+
+  if (
+    answers.company ===
+    "Sozinho"
+  ) {
+    max += 10;
+    points += 10;
+  } else if (
+    answers.company &&
+    answers.company !==
+      "Tanto faz" &&
+    COMPANY[answers.company]
+  ) {
+    max += 10;
+
+    if (
+      shares(
+        movieGenres,
+        COMPANY[answers.company],
+      )
+    ) {
+      points += 10;
+    }
+  }
+
+  if (
+    FEATURES[answers.feature]
+  ) {
+    max += 20;
+
+    if (
+      shares(
+        movieGenres,
+        FEATURES[answers.feature],
+      )
+    ) {
+      points += 20;
+    }
+  }
+
+  if (
+    answers.favoriteGenreIds.length
+  ) {
+    max += 20;
+
+    if (
+      shares(
+        movieGenres,
+        answers.favoriteGenreIds,
+      )
+    ) {
+      points += 20;
+    }
+  }
+
+  if (!max) {
+    return Math.min(
+      100,
+      Math.max(
+        0,
+        Math.round(
+          Number(
+            movie.vote_average ?? 0,
+          ) * 10,
+        ),
       ),
     );
   }
 
-  // ===========================================================
-  // TRAILER
-  // ===========================================================
-
-  Future<void> _openTrailer() async {
-    if (movie.trailer.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Trailer não encontrado para este filme.'),
-        ),
-      );
-
-      return;
-    }
-
-    await _openLink(movie.trailer);
-  }
-
-  // ===========================================================
-  // BUILD
-  // ===========================================================
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          'Detalhes',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+  return Math.min(
+    100,
+    Math.max(
+      0,
+      Math.round(
+        (points / max) * 100,
       ),
-      body: Column(
-        children: [
-          if (loadingDetails)
-            const LinearProgressIndicator(
-              color: Colors.red,
-              backgroundColor: Color(0xFF1C1C1C),
-            ),
-          if (detailsError != null)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 10,
-              ),
-              color: const Color(0xFF241010),
-              child: const Text(
-                'Não foi possível carregar todos os dados da TMDB. '
-                'As informações básicas continuam disponíveis.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(
-                25,
-                15,
-                25,
-                50,
-              ),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 1100,
-                  ),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final compact =
-                          constraints.maxWidth < 760;
+    ),
+  );
+}
 
-                      if (compact) {
-                        return _buildCompact();
-                      }
-
-                      return _buildWide();
-                    },
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ===========================================================
-  // DESKTOP
-  // ===========================================================
-
-  Widget _buildWide() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildPoster(
-          width: 300,
-          height: 450,
-        ),
-        const SizedBox(width: 40),
-        Expanded(
-          child: _buildInformation(),
-        ),
-      ],
-    );
-  }
-
-  // ===========================================================
-  // TELA MENOR
-  // ===========================================================
-
-  Widget _buildCompact() {
-    return Column(
-      children: [
-        _buildPoster(
-          width: 260,
-          height: 390,
-        ),
-        const SizedBox(height: 30),
-        _buildInformation(),
-      ],
-    );
-  }
-
-  // ===========================================================
-  // CARTAZ
-  // ===========================================================
-
-  Widget _buildPoster({
-    required double width,
-    required double height,
-  }) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: const Color(0xFF171717),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.red.withOpacity(0.18),
-            blurRadius: 30,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: _posterImage(),
-    );
-  }
-
-  Widget _posterImage() {
-    final image = movie.image.trim();
-
-    if (image.isEmpty) {
-      return _posterPlaceholder();
-    }
-
-    final isNetwork =
-        image.startsWith('http://') ||
-        image.startsWith('https://');
-
-    if (isNetwork) {
-      return Image.network(
-        image,
-        fit: BoxFit.cover,
-        filterQuality: FilterQuality.high,
-        loadingBuilder: (
-          context,
-          child,
-          loadingProgress,
-        ) {
-          if (loadingProgress == null) {
-            return child;
-          }
-
-          return Container(
-            color: const Color(0xFF171717),
-            alignment: Alignment.center,
-            child: const CircularProgressIndicator(
-              color: Colors.red,
-              strokeWidth: 2,
-            ),
-          );
-        },
-        errorBuilder: (
-          context,
-          error,
-          stackTrace,
-        ) {
-          return _posterPlaceholder();
-        },
-      );
-    }
-
-    return Image.asset(
-      'assets/images/$image',
-      fit: BoxFit.cover,
-      filterQuality: FilterQuality.high,
-      errorBuilder: (
-        context,
-        error,
-        stackTrace,
-      ) {
-        return _posterPlaceholder();
+export default async (req) => {
+  if (
+    req.method === "OPTIONS"
+  ) {
+    return new Response(
+      null,
+      {
+        status: 204,
+        headers: CORS,
       },
     );
   }
 
-  Widget _posterPlaceholder() {
-    return Container(
-      color: const Color(0xFF171717),
-      alignment: Alignment.center,
-      child: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.movie_outlined,
-            color: Colors.white38,
-            size: 64,
-          ),
-          SizedBox(height: 10),
-          Text(
-            'Sem pôster',
-            style: TextStyle(
-              color: Colors.white38,
-            ),
-          ),
-        ],
-      ),
+  const token =
+    process.env.TMDB_READ_TOKEN;
+
+  if (!token) {
+    return json(
+      {
+        error:
+          "TMDB_READ_TOKEN não foi encontrado no Netlify.",
+      },
+      500,
     );
   }
 
-  // ===========================================================
-  // INFORMAÇÕES
-  // ===========================================================
+  const requestUrl =
+    new URL(req.url);
 
-  Widget _buildInformation() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          movie.name,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 38,
-            height: 1.1,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 18),
+  const type =
+    requestUrl.searchParams.get(
+      "type",
+    ) ?? "popular";
 
-        // INFORMAÇÕES RÁPIDAS
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _infoChip(
-              Icons.star_rounded,
-              movie.rating.toStringAsFixed(1),
-              iconColor: Colors.amber,
-            ),
-            if (movie.year > 0)
-              _infoChip(
-                Icons.calendar_today_outlined,
-                movie.year.toString(),
-              ),
-            if (movie.genre.trim().isNotEmpty)
-              _infoChip(
-                Icons.movie_outlined,
-                movie.genre,
-              ),
-            _infoChip(
-              Icons.schedule_rounded,
-              movie.duration,
-            ),
-            _infoChip(
-              Icons.people_outline,
-              movie.ageRating,
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 28),
-
-        // BOTÕES
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            ElevatedButton.icon(
-              onPressed:
-                  movie.trailer.trim().isEmpty
-                      ? null
-                      : _openTrailer,
-              icon: const Icon(
-                Icons.play_arrow_rounded,
-              ),
-              label: Text(
-                loadingDetails
-                    ? 'Carregando trailer...'
-                    : 'Assistir trailer',
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                disabledBackgroundColor:
-                    Colors.red.withOpacity(0.25),
-                foregroundColor: Colors.white,
-                disabledForegroundColor: Colors.white54,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 16,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            OutlinedButton.icon(
-              onPressed: _toggleFavorite,
-              icon: Icon(
-                isFavorite
-                    ? Icons.favorite
-                    : Icons.favorite_border,
-                color: isFavorite
-                    ? Colors.red
-                    : Colors.white,
-              ),
-              label: Text(
-                isFavorite
-                    ? 'Favoritado'
-                    : 'Favoritar',
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(
-                  color: isFavorite
-                      ? Colors.red
-                      : Colors.white24,
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 16,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 36),
-
-        // =====================================================
-        // SINOPSE
-        // =====================================================
-
-        const Text(
-          'Sinopse',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          movie.description.trim().isEmpty
-              ? 'Sinopse não disponível.'
-              : movie.description,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 16,
-            height: 1.6,
-          ),
-        ),
-
-        const SizedBox(height: 38),
-
-        // =====================================================
-        // ONDE ASSISTIR
-        // =====================================================
-
-        _buildStreamingSection(),
-      ],
-    );
-  }
-
-  // ===========================================================
-  // ONDE ASSISTIR
-  // ===========================================================
-
-  Widget _buildStreamingSection() {
-    if (widget.content.tmdbId != null) {
-      return _buildTmdbStreamingSection();
-    }
-
-    return _buildLocalStreamingSection();
-  }
-
-  // ===========================================================
-  // ONDE ASSISTIR - TMDB
-  // ===========================================================
-
-  Widget _buildTmdbStreamingSection() {
-    final streaming = _providerList('streaming');
-    final free = _providerList('free');
-    final ads = _providerList('ads');
-    final rent = _providerList('rent');
-    final buy = _providerList('buy');
-
-    final hasProviders =
-        streaming.isNotEmpty ||
-        free.isNotEmpty ||
-        ads.isNotEmpty ||
-        rent.isNotEmpty ||
-        buy.isNotEmpty;
-
-    final tmdbLink =
-        watchData?['tmdbLink']?.toString().trim() ?? '';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          children: [
-            Icon(
-              Icons.live_tv_rounded,
-              color: Colors.red,
-              size: 25,
-            ),
-            SizedBox(width: 10),
-            Text(
-              'Onde assistir no Brasil',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'A disponibilidade pode mudar com o tempo.',
-          style: TextStyle(
-            color: Colors.white38,
-            fontSize: 13,
-          ),
-        ),
-        const SizedBox(height: 18),
-
-        if (loadingDetails)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0xFF151515),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: Colors.white10,
-              ),
-            ),
-            child: const Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    color: Colors.red,
-                    strokeWidth: 2,
-                  ),
-                ),
-                SizedBox(width: 14),
-                Text(
-                  'Buscando disponibilidade...',
-                  style: TextStyle(
-                    color: Colors.white70,
-                  ),
-                ),
-              ],
-            ),
-          )
-        else if (!hasProviders)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0xFF151515),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: Colors.white10,
-              ),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  color: Colors.white38,
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Nenhuma opção de exibição foi encontrada para o Brasil.',
-                    style: TextStyle(
-                      color: Colors.white54,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          )
-        else ...[
-          if (streaming.isNotEmpty)
-            _buildProviderGroup(
-              'Por assinatura',
-              Icons.subscriptions_outlined,
-              streaming,
-              tmdbLink,
-            ),
-          if (free.isNotEmpty)
-            _buildProviderGroup(
-              'Grátis',
-              Icons.card_giftcard_outlined,
-              free,
-              tmdbLink,
-            ),
-          if (ads.isNotEmpty)
-            _buildProviderGroup(
-              'Grátis com anúncios',
-              Icons.ad_units_outlined,
-              ads,
-              tmdbLink,
-            ),
-          if (rent.isNotEmpty)
-            _buildProviderGroup(
-              'Alugar',
-              Icons.schedule_send_outlined,
-              rent,
-              tmdbLink,
-            ),
-          if (buy.isNotEmpty)
-            _buildProviderGroup(
-              'Comprar',
-              Icons.shopping_bag_outlined,
-              buy,
-              tmdbLink,
-            ),
-        ],
-
-        if (tmdbLink.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () {
-              _openLink(tmdbLink);
-            },
-            icon: const Icon(
-              Icons.open_in_new_rounded,
-            ),
-            label: const Text(
-              'Ver todas as opções',
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(
-                color: Colors.white24,
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 14,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-
-        const SizedBox(height: 14),
-
-        const Text(
-          'Dados de disponibilidade: TMDB / JustWatch.',
-          style: TextStyle(
-            color: Colors.white24,
-            fontSize: 11,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProviderGroup(
-    String title,
-    IconData icon,
-    List<Map<String, dynamic>> providers,
-    String tmdbLink,
+  async function tmdb(
+    path,
+    params = {},
   ) {
-    return Padding(
-      padding: const EdgeInsets.only(
-        bottom: 22,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                icon,
-                color: Colors.white54,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: providers.map((provider) {
-              return _providerCard(
-                provider,
-                tmdbLink,
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
+    const url =
+      new URL(
+        `https://api.themoviedb.org/3${path}`,
+      );
 
-  String? _providerOfficialUrl(String providerName) {
-    final name = providerName.toLowerCase();
-
-    if (name.contains('amazon') || name.contains('prime video')) {
-      return 'https://www.primevideo.com/';
+    for (
+      const [key, value]
+      of Object.entries(params)
+    ) {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== ""
+      ) {
+        url.searchParams.set(
+          key,
+          String(value),
+        );
+      }
     }
 
-    if (name.contains('netflix')) {
-      return 'https://www.netflix.com/br/';
-    }
+    const response =
+      await fetch(
+        url,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${token}`,
 
-    if (name.contains('disney')) {
-      return 'https://www.disneyplus.com/pt-br';
-    }
+            Accept:
+              "application/json",
+          },
+        },
+      );
 
-    if (name.contains('max') || name.contains('hbo')) {
-      return 'https://www.hbomax.com/br/pt';
-    }
-
-    if (name.contains('globoplay')) {
-      return 'https://globoplay.globo.com/';
-    }
-
-    if (name.contains('apple')) {
-      return 'https://tv.apple.com/br';
-    }
-
-    if (name.contains('paramount')) {
-      return 'https://www.paramountplus.com/br/';
-    }
-
-    if (name.contains('crunchyroll')) {
-      return 'https://www.crunchyroll.com/pt-br/';
-    }
-
-    if (name.contains('universal')) {
-      return 'https://universalplus.com.br/';
-    }
-
-    if (name.contains('claro')) {
-      return 'https://www.clarotvmais.com.br/';
-    }
-
-    if (name.contains('mercado play')) {
-      return 'https://www.mercadolivre.com.br/mercado-play';
-    }
-
-    if (name.contains('google play')) {
-      return 'https://play.google.com/store/movies';
-    }
-
-    return null;
-  }
-
-  Widget _providerCard(
-    Map<String, dynamic> provider,
-    String tmdbLink,
-  ) {
-    final name =
-        provider['name']?.toString().trim() ??
-        'Streaming';
-
-    final logo =
-        provider['logo']?.toString().trim() ?? '';
-
-    final officialUrl = _providerOfficialUrl(name);
-    final canOpen = officialUrl != null;
-
-    return MouseRegion(
-      cursor: canOpen
-          ? SystemMouseCursors.click
-          : SystemMouseCursors.basic,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: canOpen
-              ? () {
-                  _openLink(officialUrl);
-                }
-              : null,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            constraints: const BoxConstraints(
-              minWidth: 170,
-              maxWidth: 270,
-            ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 11,
-            ),
-            decoration: BoxDecoration(
-              color: const Color(0xFF171717),
-              borderRadius:
-                  BorderRadius.circular(14),
-              border: Border.all(
-                color: Colors.white10,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _providerLogo(logo),
-                const SizedBox(width: 11),
-                Flexible(
-                  child: Text(
-                    name,
-                    maxLines: 2,
-                    overflow:
-                        TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight:
-                          FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (canOpen) ...[
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.open_in_new_rounded,
-                    color: Colors.white30,
-                    size: 15,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _providerLogo(String logo) {
-    if (logo.isEmpty) {
-      return Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Colors.red,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: const Icon(
-          Icons.play_arrow_rounded,
-          color: Colors.white,
-        ),
+    if (!response.ok) {
+      throw new Error(
+        `TMDB respondeu ${response.status}: ${await response.text()}`,
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Image.network(
-        logo,
-        width: 42,
-        height: 42,
-        fit: BoxFit.cover,
-        errorBuilder: (
-          context,
-          error,
-          stackTrace,
-        ) {
-          return Container(
-            width: 42,
-            height: 42,
-            color: const Color(0xFF252525),
-            child: const Icon(
-              Icons.live_tv_rounded,
-              color: Colors.white38,
+    return response.json();
+  }
+
+  try {
+    // =========================================================
+    // POPULARES
+    // =========================================================
+
+    if (type === "popular") {
+      const page =
+        requestUrl.searchParams.get(
+          "page",
+        ) ?? "1";
+
+      const data =
+        await tmdb(
+          "/movie/popular",
+          {
+            language:
+              "pt-BR",
+
+            page,
+          },
+        );
+
+      return json({
+        success:
+          true,
+
+        type:
+          "popular",
+
+        page:
+          data.page,
+
+        totalPages:
+          data.total_pages,
+
+        totalResults:
+          data.total_results,
+
+        movies:
+          data.results,
+      });
+    }
+
+    // =========================================================
+    // DETALHES
+    // =========================================================
+
+    if (type === "details") {
+      const id =
+        requestUrl.searchParams.get(
+          "id",
+        );
+
+      if (
+        !id ||
+        !/^\d+$/.test(id)
+      ) {
+        return json(
+          {
+            error:
+              "ID de filme inválido.",
+          },
+          400,
+        );
+      }
+
+      const [
+        details,
+        releaseDates,
+        watch,
+        videosPt,
+        videosEn,
+      ] =
+        await Promise.all([
+          tmdb(
+            `/movie/${id}`,
+            {
+              language:
+                "pt-BR",
+            },
+          ),
+
+          tmdb(
+            `/movie/${id}/release_dates`,
+          ),
+
+          tmdb(
+            `/movie/${id}/watch/providers`,
+          ),
+
+          tmdb(
+            `/movie/${id}/videos`,
+            {
+              language:
+                "pt-BR",
+            },
+          ),
+
+          tmdb(
+            `/movie/${id}/videos`,
+            {
+              language:
+                "en-US",
+            },
+          ),
+        ]);
+
+      const br =
+        watch?.results?.BR ?? {};
+
+      const trailer =
+        trailerUrl(videosPt) ||
+        trailerUrl(videosEn);
+
+      return json({
+        success:
+          true,
+
+        type:
+          "details",
+
+        movie: {
+          id:
+            details.id,
+
+          title:
+            details.title ?? "",
+
+          originalTitle:
+            details.original_title ??
+            "",
+
+          overview:
+            details.overview ?? "",
+
+          releaseDate:
+            details.release_date ?? "",
+
+          year:
+            details.release_date?.length >=
+            4
+              ? Number(
+                  details.release_date.slice(
+                    0,
+                    4,
+                  ),
+                )
+              : 0,
+
+          rating:
+            details.vote_average ?? 0,
+
+          voteCount:
+            details.vote_count ?? 0,
+
+          runtime:
+            details.runtime ?? 0,
+
+          genres:
+            Array.isArray(
+              details.genres,
+            )
+              ? details.genres.map(
+                  (item) =>
+                    item.name,
+                )
+              : [],
+
+          poster:
+            details.poster_path
+              ? `https://image.tmdb.org/t/p/w500${details.poster_path}`
+              : "",
+
+          backdrop:
+            details.backdrop_path
+              ? `https://image.tmdb.org/t/p/original${details.backdrop_path}`
+              : "",
+
+          certification:
+            formatCertification(
+              releaseDates,
             ),
-          );
+
+          trailer,
+
+          watch: {
+            tmdbLink:
+              br.link ?? "",
+
+            streaming:
+              providers(
+                br.flatrate,
+              ),
+
+            free:
+              providers(
+                br.free,
+              ),
+
+            ads:
+              providers(
+                br.ads,
+              ),
+
+            rent:
+              providers(
+                br.rent,
+              ),
+
+            buy:
+              providers(
+                br.buy,
+              ),
+          },
         },
-      ),
-    );
-  }
+      });
+    }
 
-  // ===========================================================
-  // ONDE ASSISTIR - FILMES MANUAIS
-  // ===========================================================
+    // =========================================================
+    // MOVIE MATCH
+    // =========================================================
 
-  Widget _buildLocalStreamingSection() {
-    final streamings = movie.streamings;
+    if (type === "match") {
+      const answers = {
+        genre:
+          requestUrl.searchParams.get(
+            "genre",
+          ) ?? "",
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          children: [
-            Icon(
-              Icons.live_tv_rounded,
-              color: Colors.red,
-              size: 25,
-            ),
-            SizedBox(width: 10),
-            Text(
-              'Onde assistir',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Clique em um streaming para abrir o site.',
-          style: TextStyle(
-            color: Colors.white38,
-            fontSize: 13,
-          ),
-        ),
-        const SizedBox(height: 18),
-        if (streamings.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0xFF151515),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: Colors.white10,
-              ),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  color: Colors.white38,
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Disponibilidade em streaming ainda não cadastrada.',
-                    style: TextStyle(
-                      color: Colors.white54,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+        mood:
+          requestUrl.searchParams.get(
+            "mood",
+          ) ?? "",
+
+        era:
+          requestUrl.searchParams.get(
+            "era",
+          ) ?? "",
+
+        duration:
+          requestUrl.searchParams.get(
+            "duration",
+          ) ?? "",
+
+        company:
+          requestUrl.searchParams.get(
+            "company",
+          ) ?? "",
+
+        feature:
+          requestUrl.searchParams.get(
+            "feature",
+          ) ?? "",
+
+        favorite:
+          requestUrl.searchParams.get(
+            "favorite",
+          ) ?? "",
+      };
+
+      const selectedStreamings =
+        (
+          requestUrl.searchParams.get(
+            "streamings",
+          ) ?? ""
+        )
+          .split("|")
+          .map(
+            (item) =>
+              item.trim(),
           )
-        else
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: streamings.map((streaming) {
-              return _streamingButton(
-                streaming,
+          .filter(
+            (item) =>
+              item &&
+              normalize(item) !==
+                "outro",
+          );
+
+      answers.favoriteGenreIds =
+        [];
+
+      // =======================================================
+      // FILME FAVORITO
+      // =======================================================
+
+      if (
+        answers.favorite.trim()
+      ) {
+        try {
+          const search =
+            await tmdb(
+              "/search/movie",
+              {
+                language:
+                  "pt-BR",
+
+                query:
+                  answers.favorite.trim(),
+
+                include_adult:
+                  false,
+
+                page:
+                  1,
+              },
+            );
+
+          const favoriteMovie =
+            Array.isArray(
+              search.results,
+            )
+              ? search.results.find(
+                  (movie) =>
+                    movie.adult !==
+                      true &&
+                    Array.isArray(
+                      movie.genre_ids,
+                    ),
+                )
+              : null;
+
+          answers.favoriteGenreIds =
+            ids(favoriteMovie);
+        } catch (_) {
+          answers.favoriteGenreIds =
+            [];
+        }
+      }
+
+      // =======================================================
+      // STREAMINGS
+      // =======================================================
+
+      let providerIds = [];
+
+      if (
+        selectedStreamings.length
+      ) {
+        try {
+          const data =
+            await tmdb(
+              "/watch/providers/movie",
+              {
+                language:
+                  "pt-BR",
+
+                watch_region:
+                  "BR",
+              },
+            );
+
+          const list =
+            Array.isArray(
+              data.results,
+            )
+              ? data.results
+              : [];
+
+          providerIds =
+            unique(
+              list
+                .filter(
+                  (provider) =>
+                    selectedStreamings.some(
+                      (selected) =>
+                        providerMatches(
+                          selected,
+                          provider.provider_name,
+                        ),
+                    ),
+                )
+                .map(
+                  (provider) =>
+                    String(
+                      provider.provider_id,
+                    ),
+                ),
+            );
+        } catch (_) {
+          providerIds = [];
+        }
+      }
+
+      const currentYear =
+        new Date().getFullYear();
+
+      const today =
+        new Date()
+          .toISOString()
+          .slice(
+            0,
+            10,
+          );
+
+      const params = {
+        language:
+          "pt-BR",
+
+        include_adult:
+          false,
+
+        include_video:
+          false,
+
+        sort_by:
+          "popularity.desc",
+
+        "vote_count.gte":
+          30,
+      };
+
+      // =======================================================
+      // GÊNERO
+      // =======================================================
+
+      if (
+        GENRES[answers.genre]
+      ) {
+        params.with_genres =
+          GENRES[answers.genre];
+      }
+
+      // =======================================================
+      // ÉPOCA
+      // =======================================================
+
+      if (
+        answers.era ===
+        "Lançamentos"
+      ) {
+        params[
+          "primary_release_date.gte"
+        ] =
+          `${currentYear - 3}-01-01`;
+
+        params[
+          "primary_release_date.lte"
+        ] =
+          today;
+      } else if (
+        answers.era ===
+        "Recentes"
+      ) {
+        params[
+          "primary_release_date.gte"
+        ] =
+          `${currentYear - 15}-01-01`;
+
+        params[
+          "primary_release_date.lte"
+        ] =
+          today;
+      } else if (
+        answers.era ===
+        "Clássicos"
+      ) {
+        params[
+          "primary_release_date.lte"
+        ] =
+          `${currentYear - 16}-12-31`;
+      }
+
+      // =======================================================
+      // DURAÇÃO
+      // =======================================================
+
+      answers.durationFilterApplied =
+        answers.duration !== "" &&
+        answers.duration !==
+          "Tanto faz";
+
+      if (
+        answers.duration === "Curto"
+      ) {
+        params[
+          "with_runtime.lte"
+        ] =
+          100;
+      } else if (
+        answers.duration === "Médio"
+      ) {
+        params[
+          "with_runtime.gte"
+        ] =
+          101;
+
+        params[
+          "with_runtime.lte"
+        ] =
+          150;
+      } else if (
+        answers.duration === "Longo"
+      ) {
+        params[
+          "with_runtime.gte"
+        ] =
+          151;
+      }
+
+      // =======================================================
+      // STREAMING
+      // =======================================================
+
+      answers.streamingFilterApplied =
+        providerIds.length > 0;
+
+      if (
+        answers.streamingFilterApplied
+      ) {
+        params.watch_region =
+          "BR";
+
+        params.with_watch_providers =
+          providerIds.join("|");
+
+        params.with_watch_monetization_types =
+          "flatrate|free|ads";
+      }
+
+      // =======================================================
+      // BUSCA CANDIDATOS
+      // =======================================================
+
+      async function getCandidates(
+        pageCount = 3,
+      ) {
+        const all = [];
+
+        for (
+          let page = 1;
+          page <= pageCount;
+          page++
+        ) {
+          const data =
+            await tmdb(
+              "/discover/movie",
+              {
+                ...params,
+                page,
+              },
+            );
+
+          const results =
+            Array.isArray(
+              data.results,
+            )
+              ? data.results
+              : [];
+
+          all.push(
+            ...results,
+          );
+
+          if (
+            page >=
+            Number(
+              data.total_pages ?? 1,
+            )
+          ) {
+            break;
+          }
+        }
+
+        const map =
+          new Map();
+
+        for (
+          const movie of all
+        ) {
+          if (
+            movie?.id &&
+            movie.adult !== true &&
+            !map.has(
+              movie.id,
+            )
+          ) {
+            map.set(
+              movie.id,
+              movie,
+            );
+          }
+        }
+
+        return [
+          ...map.values(),
+        ];
+      }
+
+      let candidates =
+        await getCandidates();
+
+      // =======================================================
+      // FALLBACK STREAMING
+      // =======================================================
+
+      if (
+        !candidates.length &&
+        answers.streamingFilterApplied
+      ) {
+        delete params.watch_region;
+
+        delete params.with_watch_providers;
+
+        delete params.with_watch_monetization_types;
+
+        answers.streamingFilterApplied =
+          false;
+
+        candidates =
+          await getCandidates();
+      }
+
+      // =======================================================
+      // FALLBACK DURAÇÃO
+      // =======================================================
+
+      if (
+        !candidates.length &&
+        answers.durationFilterApplied
+      ) {
+        delete params[
+          "with_runtime.gte"
+        ];
+
+        delete params[
+          "with_runtime.lte"
+        ];
+
+        answers.durationFilterApplied =
+          false;
+
+        candidates =
+          await getCandidates();
+      }
+
+      // =======================================================
+      // CALCULA COMPATIBILIDADE
+      // =======================================================
+
+      const ranked =
+        candidates
+          .map(
+            (movie) => ({
+              movie,
+
+              compatibility:
+                scoreMovie(
+                  movie,
+                  answers,
+                ),
+            }),
+          )
+          .sort(
+            (a, b) => {
+              if (
+                b.compatibility !==
+                a.compatibility
+              ) {
+                return (
+                  b.compatibility -
+                  a.compatibility
+                );
+              }
+
+              return (
+                Number(
+                  b.movie
+                    .vote_average ??
+                    0,
+                ) -
+                Number(
+                  a.movie
+                    .vote_average ??
+                    0,
+                )
               );
-            }).toList(),
+            },
+          )
+          .slice(
+            0,
+            12,
+          );
+
+      // =======================================================
+      // PEGA STREAMINGS DOS RESULTADOS
+      // =======================================================
+
+      const movies =
+        await Promise.all(
+          ranked.map(
+            async ({
+              movie,
+              compatibility,
+            }) => {
+              let streamings = [];
+
+              try {
+                const data =
+                  await tmdb(
+                    `/movie/${movie.id}/watch/providers`,
+                  );
+
+                const br =
+                  data?.results?.BR ??
+                  {};
+
+                streamings =
+                  unique([
+                    ...(
+                      Array.isArray(
+                        br.flatrate,
+                      )
+                        ? br.flatrate.map(
+                            (item) =>
+                              item.provider_name,
+                          )
+                        : []
+                    ),
+
+                    ...(
+                      Array.isArray(
+                        br.free,
+                      )
+                        ? br.free.map(
+                            (item) =>
+                              item.provider_name,
+                          )
+                        : []
+                    ),
+
+                    ...(
+                      Array.isArray(
+                        br.ads,
+                      )
+                        ? br.ads.map(
+                            (item) =>
+                              item.provider_name,
+                          )
+                        : []
+                    ),
+                  ]);
+              } catch (_) {
+                streamings =
+                  [];
+              }
+
+              return {
+                ...movie,
+
+                compatibility,
+
+                streamings,
+              };
+            },
           ),
-        const SizedBox(height: 12),
-        if (streamings.isNotEmpty)
-          const Text(
-            'A disponibilidade dos filmes pode mudar com o tempo.',
-            style: TextStyle(
-              color: Colors.white24,
-              fontSize: 11,
-            ),
-          ),
-      ],
+        );
+
+      return json({
+        success:
+          true,
+
+        type:
+          "match",
+
+        candidateCount:
+          candidates.length,
+
+        movies,
+      });
+    }
+
+    return json(
+      {
+        error:
+          "Tipo de consulta inválido.",
+      },
+      400,
+    );
+  } catch (error) {
+    return json(
+      {
+        error:
+          "Erro ao consultar a TMDB.",
+
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+      500,
     );
   }
-
-  // ===========================================================
-  // BOTÃO DE STREAMING MANUAL
-  // ===========================================================
-
-  Widget _streamingButton(String streaming) {
-    final url = streamingLinks[streaming];
-
-    final hasLink = url != null;
-
-    return MouseRegion(
-      cursor: hasLink
-          ? SystemMouseCursors.click
-          : SystemMouseCursors.basic,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: hasLink
-              ? () {
-                  _openLink(url);
-                }
-              : null,
-          borderRadius:
-              BorderRadius.circular(14),
-          child: Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: 14,
-            ),
-            decoration: BoxDecoration(
-              color: const Color(0xFF171717),
-              borderRadius:
-                  BorderRadius.circular(14),
-              border: Border.all(
-                color: hasLink
-                    ? Colors.red.withOpacity(0.65)
-                    : Colors.white12,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    borderRadius:
-                        BorderRadius.circular(9),
-                  ),
-                  child: const Icon(
-                    Icons.play_arrow_rounded,
-                    color: Colors.white,
-                    size: 23,
-                  ),
-                ),
-                const SizedBox(width: 11),
-                Text(
-                  streaming,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight:
-                        FontWeight.bold,
-                  ),
-                ),
-                if (hasLink) ...[
-                  const SizedBox(width: 12),
-                  const Icon(
-                    Icons.open_in_new_rounded,
-                    color: Colors.white38,
-                    size: 17,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ===========================================================
-  // CHIP
-  // ===========================================================
-
-  Widget _infoChip(
-    IconData icon,
-    String text, {
-    Color iconColor = Colors.white70,
-  }) {
-    final displayText = text.trim().isEmpty
-        ? 'Não informado'
-        : text;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 9,
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFF171717),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: Colors.white10,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            color: iconColor,
-            size: 17,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            displayText,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+};
