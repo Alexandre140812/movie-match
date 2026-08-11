@@ -646,7 +646,38 @@ export default async (req) => {
           data.results,
       });
     }
+// ========================================================
+// FILMES EM CARTAZ NOS CINEMAS DO BRASIL
+// ========================================================
 
+if (type === "now_playing") {
+  const data = await tmdbFetch(
+    "/movie/now_playing",
+    {
+      language: "pt-BR",
+      region: "BR",
+      page,
+    },
+  );
+
+  const movies =
+    Array.isArray(data.results)
+      ? data.results.filter(
+          (movie) =>
+            movie.adult !== true &&
+            movie.id,
+        )
+      : [];
+
+  return jsonResponse({
+    success: true,
+    type: "now_playing",
+    page: data.page ?? 1,
+    totalPages: data.total_pages ?? 0,
+    totalResults: data.total_results ?? 0,
+    movies,
+  });
+}
     // =========================================================
     // DETALHES
     // =========================================================
