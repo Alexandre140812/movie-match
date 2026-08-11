@@ -821,7 +821,63 @@ export default async (req) => {
         },
       });
     }
+// =========================================================
+// BUSCA DE FILMES
+// =========================================================
 
+if (type === "search") {
+  const query =
+    requestUrl.searchParams.get("query")?.trim() ?? "";
+
+  const page =
+    requestUrl.searchParams.get("page") ?? "1";
+
+  if (query.length < 2) {
+    return json({
+      success: true,
+      type: "search",
+      page: 1,
+      totalPages: 0,
+      totalResults: 0,
+      movies: [],
+    });
+  }
+
+  const data = await tmdb(
+    "/search/movie",
+    {
+      query,
+      language: "pt-BR",
+      include_adult: false,
+      page,
+    },
+  );
+
+  const movies =
+    Array.isArray(data.results)
+      ? data.results.filter(
+          (movie) =>
+            movie.adult !== true &&
+            movie.id,
+        )
+      : [];
+
+  return json({
+    success: true,
+    type: "search",
+
+    page:
+      data.page ?? 1,
+
+    totalPages:
+      data.total_pages ?? 0,
+
+    totalResults:
+      data.total_results ?? 0,
+
+    movies,
+  });
+}
     // =========================================================
     // MOVIE MATCH
     // =========================================================
