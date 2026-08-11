@@ -651,7 +651,10 @@ export default async (req) => {
 // ========================================================
 
 if (type === "now_playing") {
-  const data = await tmdbFetch(
+  const page =
+    requestUrl.searchParams.get("page") ?? "1";
+
+  const data = await tmdb(
     "/movie/now_playing",
     {
       language: "pt-BR",
@@ -669,7 +672,7 @@ if (type === "now_playing") {
         )
       : [];
 
-  return jsonResponse({
+  return json({
     success: true,
     type: "now_playing",
     page: data.page ?? 1,
