@@ -320,6 +320,30 @@ function providerMatchesSelection(selection, providerName) {
   return provider.includes(selected);
 }
 
+
+function providerMatchesDirectStreaming(
+  selection,
+  providerName,
+) {
+  const provider =
+    normalizeText(providerName);
+
+  // A aba de streaming representa a assinatura principal,
+  // não canais vendidos dentro de outro serviço.
+  if (
+    provider.includes("amazon channel") ||
+    provider.includes("apple tv channel") ||
+    provider.includes("channels")
+  ) {
+    return false;
+  }
+
+  return providerMatchesSelection(
+    selection,
+    providerName,
+  );
+}
+
 function movieYear(movie) {
   const releaseDate = String(movie?.release_date ?? "");
 
@@ -2368,6 +2392,400 @@ export default async (request, context) => {
     // ========================================================
     // MOVIE MATCH — FILME / SÉRIE / TANTO FAZ
     // ========================================================
+
+
+    // ===========================================================
+    // STREAMINGS DISPONÍVEIS NO BRASIL
+    // ===========================================================
+
+    if (type === "streaming_providers") {
+      const preferredProviders = [
+        "Netflix",
+        "Prime Video",
+        "Disney+",
+        "Max",
+        "Globoplay",
+        "Apple TV+",
+        "Paramount+",
+        "Crunchyroll",
+        "MUBI",
+        "Universal+",
+        "Claro tv+",
+      ];
+
+      const [movieProviderData, tvProviderData] =
+        await Promise.all([
+          tmdbFetch("/watch/providers/movie", {
+            language: "pt-BR",
+            watch_region: "BR",
+          }),
+          tmdbFetch("/watch/providers/tv", {
+            language: "pt-BR",
+            watch_region: "BR",
+          }),
+        ]);
+
+      const movieProviders =
+        Array.isArray(movieProviderData.results)
+          ? movieProviderData.results
+          : [];
+
+      const tvProviders =
+        Array.isArray(tvProviderData.results)
+          ? tvProviderData.results
+          : [];
+
+      const providers = [];
+
+      for (const displayName of preferredProviders) {
+        const movieMatches =
+          movieProviders.filter((provider) =>
+            providerMatchesDirectStreaming(
+              displayName,
+              provider.provider_name,
+            ),
+          );
+
+        const tvMatches =
+          tvProviders.filter((provider) =>
+            providerMatchesDirectStreaming(
+              displayName,
+              provider.provider_name,
+            ),
+          );
+
+        if (
+          movieMatches.length === 0 &&
+          tvMatches.length === 0
+        ) {
+          continue;
+        }
+
+        const representative =
+          movieMatches[0] ?? tvMatches[0];
+
+        providers.push({
+          name: displayName,
+          movieProviderIds: uniqueStrings(
+            movieMatches.map((provider) =>
+              String(provider.provider_id),
+            ),
+          ).map(Number),
+          tvProviderIds: uniqueStrings(
+            tvMatches.map((provider) =>
+              String(provider.provider_id),
+            ),
+          ).map(Number),
+          logo: representative?.logo_path
+            ? `https://image.tmdb.org/t/p/w185${representative.logo_path}`
+            : "",
+          originalName:
+            representative?.provider_name ?? displayName,
+        });
+      }
+
+      return jsonResponse({
+        success: true,
+        type: "streaming_providers",
+        region: "BR",
+        providers,
+      });
+    }
+
+    // ===========================================================
+    // CATÁLOGO DE UM STREAMING
+    // ===========================================================
+
+    if (type === "streaming_catalog") {
+      const providerName =
+        (
+          requestUrl.searchParams.get("provider") ?? ""
+        ).trim();
+
+      if (!providerName) {
+        return jsonResponse(
+          {
+            success: false,
+            error: "O streaming não foi informado.",
+          },
+          400,
+        );
+      }
+
+      const mediaPreference =
+        normalizeMediaPreference(
+          requestUrl.searchParams.get("media") ?? "both",
+        );
+
+      const searchQuery =
+        (
+          requestUrl.searchParams.get("query") ?? ""
+        ).trim();
+
+      const requestedPage =
+        Math.max(
+          1,
+          Number(
+            requestUrl.searchParams.get("page") ?? 1,
+          ) || 1,
+        );
+
+      const wantedMediaTypes =
+        mediaPreference === "both"
+          ? ["movie", "tv"]
+          : [mediaPreference];
+
+      async function providerIdsForCatalog(mediaType) {
+        const providerData =
+          await tmdbFetch(
+            mediaType === "tv"
+              ? "/watch/providers/tv"
+              : "/watch/providers/movie",
+            {
+              language: "pt-BR",
+              watch_region: "BR",
+            },
+          );
+
+        const providers =
+          Array.isArray(providerData.results)
+            ? providerData.results
+            : [];
+
+        return uniqueStrings(
+          providers
+            .filter((provider) =>
+              providerMatchesDirectStreaming(
+                providerName,
+                provider.provider_name,
+              ),
+            )
+            .map((provider) =>
+              String(provider.provider_id),
+            ),
+        ).map(Number);
+      }
+
+      async function isAvailableOnProvider({
+        id,
+        mediaType,
+        providerIds,
+      }) {
+        if (providerIds.length === 0) {
+          return false;
+        }
+
+        try {
+          const data =
+            await tmdbFetch(
+              mediaType === "tv"
+                ? `/tv/${id}/watch/providers`
+                : `/movie/${id}/watch/providers`,
+            );
+
+          const br = data.results?.BR ?? {};
+          const groups = [
+            br.flatrate,
+            br.free,
+            br.ads,
+          ];
+
+          for (const group of groups) {
+            if (!Array.isArray(group)) {
+              continue;
+            }
+
+            if (
+              group.some((provider) =>
+                providerIds.includes(
+                  Number(provider.provider_id),
+                ),
+              )
+            ) {
+              return true;
+            }
+          }
+        } catch (_) {
+          return false;
+        }
+
+        return false;
+      }
+
+      async function discoverStreamingCatalog(
+        mediaType,
+        providerIds,
+      ) {
+        if (providerIds.length === 0) {
+          return [];
+        }
+
+        const all = [];
+
+        for (
+          let discoverPage = 1;
+          discoverPage <= 2;
+          discoverPage++
+        ) {
+          const data =
+            await tmdbFetch(
+              mediaType === "tv"
+                ? "/discover/tv"
+                : "/discover/movie",
+              {
+                language: "pt-BR",
+                include_adult: false,
+                page:
+                  (requestedPage - 1) * 2 +
+                  discoverPage,
+                sort_by: "popularity.desc",
+                "vote_count.gte": 20,
+                watch_region: "BR",
+                with_watch_providers:
+                  providerIds.join("|"),
+                with_watch_monetization_types:
+                  "flatrate|free|ads",
+              },
+            );
+
+          const results =
+            Array.isArray(data.results)
+              ? data.results
+              : [];
+
+          all.push(...results);
+        }
+
+        return all;
+      }
+
+      async function searchStreamingCatalog(
+        mediaType,
+        providerIds,
+      ) {
+        if (
+          providerIds.length === 0 ||
+          searchQuery.length < 2
+        ) {
+          return [];
+        }
+
+        const data =
+          await tmdbFetch(
+            mediaType === "tv"
+              ? "/search/tv"
+              : "/search/movie",
+            {
+              language: "pt-BR",
+              include_adult: false,
+              query: searchQuery,
+              page: requestedPage,
+            },
+          );
+
+        const candidates =
+          (
+            Array.isArray(data.results)
+              ? data.results
+              : []
+          )
+            .filter(
+              (item) =>
+                item?.id &&
+                item.adult !== true,
+            )
+            .slice(0, 20);
+
+        const checks =
+          await Promise.all(
+            candidates.map(async (item) => {
+              const available =
+                await isAvailableOnProvider({
+                  id: item.id,
+                  mediaType,
+                  providerIds,
+                });
+
+              return available ? item : null;
+            }),
+          );
+
+        return checks.filter(Boolean);
+      }
+
+      const groups =
+        await Promise.all(
+          wantedMediaTypes.map(async (mediaType) => {
+            const providerIds =
+              await providerIdsForCatalog(mediaType);
+
+            const items =
+              searchQuery.length >= 2
+                ? await searchStreamingCatalog(
+                    mediaType,
+                    providerIds,
+                  )
+                : await discoverStreamingCatalog(
+                    mediaType,
+                    providerIds,
+                  );
+
+            return items.map((item) =>
+              normalizeMediaItem(item, mediaType),
+            );
+          }),
+        );
+
+      const unique = new Map();
+
+      for (const group of groups) {
+        for (const item of group) {
+          const key =
+            `${item.mediaType}:${item.id}`;
+
+          if (
+            item?.id &&
+            item.adult !== true &&
+            !unique.has(key)
+          ) {
+            unique.set(key, item);
+          }
+        }
+      }
+
+      const results = [...unique.values()];
+
+      if (searchQuery.length < 2) {
+        results.sort((a, b) => {
+          function score(item) {
+            const rating =
+              Number(item.vote_average ?? 0);
+            const votes =
+              Number(item.vote_count ?? 0);
+            const popularity =
+              Number(item.popularity ?? 0);
+
+            return (
+              rating * 13 +
+              Math.log(votes + 1) * 5.2 +
+              Math.log(popularity + 1) * 4.2
+            );
+          }
+
+          return score(b) - score(a);
+        });
+      }
+
+      return jsonResponse({
+        success: true,
+        type: "streaming_catalog",
+        provider: providerName,
+        mediaPreference,
+        query: searchQuery,
+        region: "BR",
+        results: results.slice(0, 36),
+      });
+    }
 
     if (type === "match") {
       const mediaPreference =
