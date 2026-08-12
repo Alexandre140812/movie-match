@@ -406,12 +406,14 @@ function scoreMovie({
   ) {
     maximumPoints += 20;
 
+    // O Discover já filtrou para pelo menos um streaming escolhido.
     points += 20;
   }
 
   if (duration && duration !== "Tanto faz") {
     maximumPoints += 15;
 
+    // O Discover já filtrou pela duração.
     points += 15;
   }
 
@@ -467,6 +469,7 @@ function scoreMovie({
   );
 }
 
+
 // ============================================================
 // HELPERS GENÉRICOS: FILME + SÉRIE
 // ============================================================
@@ -495,7 +498,6 @@ function isFutureDate(value) {
   }
 
   const now = new Date();
-
   const today = new Date(
     Date.UTC(
       now.getUTCFullYear(),
@@ -559,10 +561,8 @@ function mediaOriginalTitle(item, mediaType) {
 
 function normalizeMediaItem(item, mediaType) {
   const title = mediaTitle(item, mediaType);
-
   const originalTitle =
     mediaOriginalTitle(item, mediaType);
-
   const releaseDate =
     mediaDate(item, mediaType);
 
@@ -572,6 +572,9 @@ function normalizeMediaItem(item, mediaType) {
     media_type: mediaType,
     mediaType,
 
+    // Campos compatíveis com o mapeamento que o Flutter já usa
+    // para filmes. Assim séries podem entrar no banner e no
+    // Movie Match sem duplicarmos toda a estrutura.
     title,
     original_title: originalTitle,
     release_date: releaseDate,
@@ -714,420 +717,100 @@ function matchesEraForMedia(
 
   return true;
 }
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-};
 
-const GENRE_IDS = {
-  "Ação": 28,
-  "Aventura": 12,
-  "Animação": 16,
-  "Comédia": 35,
-  "Crime": 80,
-  "Documentário": 99,
-  "Drama": 18,
-  "Família": 10751,
-  "Fantasia": 14,
-  "História": 36,
-  "Terror": 27,
-  "Música": 10402,
-  "Mistério": 9648,
-  "Romance": 10749,
-  "Ficção": 878,
-  "Suspense": 53,
-  "Guerra": 10752,
-  "Faroeste": 37,
-};
-
-const MOOD_GENRES = {
-  "Divertido": [35, 16, 10751],
-  "Emocionante": [18, 12, 10749],
-  "Tenso": [53, 27, 80, 28],
-  "Relaxante": [35, 10751, 16, 10749],
-  "Misterioso": [9648, 53, 80],
-  "Inspirador": [18, 36, 99, 10402],
-};
-
-const FEATURE_GENRES = {
-  "História": [18, 36, 9648],
-  "Ação": [28, 12],
-  "Personagens": [18, 35, 10749],
-  "Humor": [35, 16],
-  "Visual": [878, 14, 16, 12],
-  "Suspense": [53, 9648, 27],
-  "Música": [10402],
-};
-
-const COMPANY_GENRES = {
-  "Família": [10751, 16, 35, 12],
-  "Amigos": [28, 35, 27, 12, 16],
-  "Casal": [10749, 35, 18],
-};
-
-// ============================================================
-// GÊNEROS E REGRAS PARA SÉRIES
-// ============================================================
-
-const TV_GENRE_IDS = {
-  "Ação": [10759],
-  "Aventura": [10759],
-  "Animação": [16],
-  "Comédia": [35],
-  "Crime": [80],
-  "Documentário": [99],
-  "Drama": [18],
-  "Família": [10751, 10762],
-  "Fantasia": [10765],
-  "História": [18, 10768],
-  "Terror": [9648, 10765],
-  "Música": [18, 35],
-  "Mistério": [9648],
-  "Romance": [18, 35],
-  "Ficção": [10765],
-  "Suspense": [9648, 80, 18],
-  "Guerra": [10768],
-  "Faroeste": [37],
-};
-
-const TV_MOOD_GENRES = {
-  "Divertido": [35, 16, 10751, 10762],
-  "Emocionante": [18, 10759, 10765],
-  "Tenso": [9648, 80, 10759, 18],
-  "Relaxante": [35, 10751, 16],
-  "Misterioso": [9648, 80],
-  "Inspirador": [18, 99, 10759],
-};
-
-const TV_FEATURE_GENRES = {
-  "História": [18, 9648, 99],
-  "Ação": [10759],
-  "Personagens": [18, 35, 80],
-  "Humor": [35, 16],
-  "Visual": [10765, 16, 10759],
-  "Suspense": [9648, 80, 18],
-  "Música": [18, 35],
-};
-
-const TV_COMPANY_GENRES = {
-  "Família": [10751, 10762, 16, 35, 10759],
-  "Amigos": [10759, 35, 9648, 16],
-  "Casal": [18, 35],
-};
-
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-  });
-}
-
-function normalizeText(value) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
-function uniqueStrings(values) {
-  return [...new Set(values.filter(Boolean))];
-}
-
-function genreIdsFromMovie(movie) {
-  return Array.isArray(movie?.genre_ids)
-    ? movie.genre_ids
-        .map((id) => Number(id))
-        .filter((id) => Number.isFinite(id))
-    : [];
-}
-
-function hasIntersection(first, second) {
-  if (!Array.isArray(first) || !Array.isArray(second)) {
-    return false;
-  }
-
-  const set = new Set(first);
-
-  return second.some((value) => set.has(value));
-}
-
-function getBrazilCertification(releaseDatesData) {
-  const brazil = releaseDatesData.results?.find(
-    (country) => country.iso_3166_1 === "BR",
-  );
-
-  if (!brazil || !Array.isArray(brazil.release_dates)) {
-    return "Não informada";
-  }
-
-  const releases = brazil.release_dates;
-
-  const preferredTypes = [3, 4, 6, 2, 1, 5];
-
-  let certification = "";
-
-  for (const type of preferredTypes) {
-    const release = releases.find(
-      (item) =>
-        item.type === type &&
-        typeof item.certification === "string" &&
-        item.certification.trim() !== "",
-    );
-
-    if (release) {
-      certification = release.certification.trim();
-      break;
-    }
-  }
-
-  if (!certification) {
-    const anyRelease = releases.find(
-      (item) =>
-        typeof item.certification === "string" &&
-        item.certification.trim() !== "",
-    );
-
-    certification = anyRelease?.certification?.trim() ?? "";
-  }
-
-  if (!certification) {
-    return "Não informada";
-  }
-
-  if (certification.toUpperCase() === "L") {
-    return "Livre";
-  }
-
-  if (/^\d+$/.test(certification)) {
-    return `${certification} anos`;
-  }
-
-  return certification;
-}
-
-function getBestTrailer(videosData) {
-  const videos = Array.isArray(videosData?.results)
-    ? videosData.results
-    : [];
-
-  const youtubeVideos = videos.filter(
-    (video) =>
-      video.site === "YouTube" &&
-      typeof video.key === "string" &&
-      video.key.length > 0,
-  );
-
-  if (youtubeVideos.length === 0) {
-    return "";
-  }
-
-  const officialTrailer = youtubeVideos.find(
-    (video) =>
-      video.type === "Trailer" &&
-      video.official === true,
-  );
-
-  const anyTrailer = youtubeVideos.find(
-    (video) => video.type === "Trailer",
-  );
-
-  const teaser = youtubeVideos.find(
-    (video) => video.type === "Teaser",
-  );
-
-  const chosen =
-    officialTrailer ??
-    anyTrailer ??
-    teaser ??
-    youtubeVideos[0];
-
-  return `https://www.youtube.com/watch?v=${chosen.key}`;
-}
-
-function normalizeProviders(list) {
-  if (!Array.isArray(list)) {
-    return [];
-  }
-
-  return list.map((provider) => ({
-    id: provider.provider_id,
-    name: provider.provider_name,
-    logo: provider.logo_path
-      ? `https://image.tmdb.org/t/p/w185${provider.logo_path}`
-      : "",
-  }));
-}
-
-function providerMatchesSelection(selection, providerName) {
-  const selected = normalizeText(selection);
-  const provider = normalizeText(providerName);
-
-  if (!selected || selected === "outro") {
-    return false;
-  }
-
-  if (selected === "netflix") {
-    return provider.includes("netflix");
-  }
-
-  if (selected === "prime video") {
-    return (
-      provider.includes("amazon prime video") ||
-      provider === "prime video"
-    );
-  }
-
-  if (selected === "disney+") {
-    return (
-      provider.includes("disney plus") ||
-      provider.includes("disney+")
-    );
-  }
-
-  if (selected === "hbo max" || selected === "max") {
-    return (
-      provider === "max" ||
-      provider.includes("hbo max") ||
-      provider.includes("max amazon channel")
-    );
-  }
-
-  if (selected === "globoplay") {
-    return provider.includes("globoplay");
-  }
-
-  if (selected === "apple tv+") {
-    return (
-      provider.includes("apple tv plus") ||
-      provider.includes("apple tv+")
-    );
-  }
-
-  if (selected === "paramount+") {
-    return (
-      provider.includes("paramount plus") ||
-      provider.includes("paramount+")
-    );
-  }
-
-  if (selected === "crunchyroll") {
-    return provider.includes("crunchyroll");
-  }
-
-  if (selected === "universal+") {
-    return (
-      provider.includes("universal+") ||
-      provider.includes("universal plus")
-    );
-  }
-
-  if (selected === "claro tv+") {
-    return (
-      provider.includes("claro tv") ||
-      provider.includes("claro video")
-    );
-  }
-
-  return provider.includes(selected);
-}
-
-function movieYear(movie) {
-  const releaseDate = String(movie?.release_date ?? "");
-
-  if (releaseDate.length < 4) {
-    return 0;
-  }
-
-  return Number(releaseDate.substring(0, 4)) || 0;
-}
-
-function matchesEra(movie, era, currentYear) {
-  const year = movieYear(movie);
-
-  if (!era || era === "Tanto faz") {
-    return true;
-  }
-
-  if (year <= 0) {
-    return false;
-  }
-
-  if (era === "Lançamentos") {
-    return year >= currentYear - 3;
-  }
-
-  if (era === "Recentes") {
-    return year >= currentYear - 15;
-  }
-
-  if (era === "Clássicos") {
-    return year < currentYear - 15;
-  }
-
-  return true;
-}
-
-function scoreMovie({
-  movie,
+function scoreMediaItem({
+  item,
+  mediaType,
   genre,
   mood,
   era,
   duration,
   company,
   feature,
-  selectedStreamings,
-  favoriteGenreIds,
   streamingFilterApplied,
   currentYear,
 }) {
-  const ids = genreIdsFromMovie(movie);
+  const ids = genreIdsFromMovie(item);
 
   let points = 0;
   let maximumPoints = 0;
 
-  const selectedGenreId = GENRE_IDS[genre];
+  const selectedGenreIds =
+    genreIdsForSelection(
+      genre,
+      mediaType,
+    );
 
-  if (genre && selectedGenreId) {
+  if (
+    genre &&
+    selectedGenreIds.length > 0
+  ) {
     maximumPoints += 30;
 
-    if (ids.includes(selectedGenreId)) {
+    if (
+      hasIntersection(
+        ids,
+        selectedGenreIds,
+      )
+    ) {
       points += 30;
     }
   }
 
-  if (mood && MOOD_GENRES[mood]) {
+  const moodIds =
+    moodIdsForSelection(
+      mood,
+      mediaType,
+    );
+
+  if (
+    mood &&
+    moodIds.length > 0
+  ) {
     maximumPoints += 20;
 
-    if (hasIntersection(ids, MOOD_GENRES[mood])) {
+    if (
+      hasIntersection(
+        ids,
+        moodIds,
+      )
+    ) {
       points += 20;
     }
   }
 
-  if (era && era !== "Tanto faz") {
+  if (
+    era &&
+    era !== "Tanto faz"
+  ) {
     maximumPoints += 15;
 
-    if (matchesEra(movie, era, currentYear)) {
+    if (
+      matchesEraForMedia(
+        item,
+        mediaType,
+        era,
+        currentYear,
+      )
+    ) {
       points += 15;
     }
   }
 
-  if (
-    selectedStreamings.length > 0 &&
-    streamingFilterApplied
-  ) {
+  if (streamingFilterApplied) {
     maximumPoints += 20;
 
+    // Discover já aplicou o filtro.
     points += 20;
   }
 
-  if (duration && duration !== "Tanto faz") {
+  if (
+    duration &&
+    duration !== "Tanto faz"
+  ) {
     maximumPoints += 15;
 
+    // Discover já aplicou a duração.
     points += 15;
   }
 
@@ -1138,39 +821,62 @@ function scoreMovie({
   ) {
     maximumPoints += 10;
 
+    const companyIds =
+      companyIdsForSelection(
+        company,
+        mediaType,
+      );
+
     if (
-      COMPANY_GENRES[company] &&
-      hasIntersection(ids, COMPANY_GENRES[company])
+      companyIds.length > 0 &&
+      hasIntersection(
+        ids,
+        companyIds,
+      )
     ) {
       points += 10;
     }
-  } else if (company === "Sozinho") {
+  } else if (
+    company === "Sozinho"
+  ) {
     maximumPoints += 10;
     points += 10;
   }
 
-  if (feature && FEATURE_GENRES[feature]) {
+  const featureIds =
+    featureIdsForSelection(
+      feature,
+      mediaType,
+    );
+
+  if (
+    feature &&
+    featureIds.length > 0
+  ) {
     maximumPoints += 20;
 
-    if (hasIntersection(ids, FEATURE_GENRES[feature])) {
-      points += 20;
-    }
-  }
-
-  if (favoriteGenreIds.length > 0) {
-    maximumPoints += 20;
-
-    if (hasIntersection(ids, favoriteGenreIds)) {
+    if (
+      hasIntersection(
+        ids,
+        featureIds,
+      )
+    ) {
       points += 20;
     }
   }
 
   if (maximumPoints === 0) {
-    const rating = Number(movie.vote_average ?? 0);
+    const rating =
+      Number(
+        item?.vote_average ?? 0,
+      );
 
     return Math.max(
       0,
-      Math.min(100, Math.round(rating * 10)),
+      Math.min(
+        100,
+        Math.round(rating * 10),
+      ),
     );
   }
 
@@ -1178,258 +884,667 @@ function scoreMovie({
     0,
     Math.min(
       100,
-      Math.round((points / maximumPoints) * 100),
+      Math.round(
+        (points / maximumPoints) * 100,
+      ),
     ),
   );
 }
 
-// ============================================================
-// HELPERS GENÉRICOS: FILME + SÉRIE
-// ============================================================
+function getBrazilTvCertification(contentRatingsData) {
+  const results =
+    Array.isArray(
+      contentRatingsData?.results,
+    )
+      ? contentRatingsData.results
+      : [];
 
-function parseDateOnly(value) {
-  const raw = String(value ?? "").trim();
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    return null;
-  }
-
-  const date = new Date(`${raw}T00:00:00Z`);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
-}
-
-function isFutureDate(value) {
-  const parsed = parseDateOnly(value);
-
-  if (!parsed) {
-    return false;
-  }
-
-  const now = new Date();
-
-  const today = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-    ),
-  );
-
-  return parsed.getTime() > today.getTime();
-}
-
-function mediaDate(item, mediaType) {
-  return String(
-    mediaType === "tv"
-      ? item?.first_air_date ?? item?.air_date ?? ""
-      : item?.release_date ?? "",
-  );
-}
-
-function mediaYear(item, mediaType) {
-  const date = mediaDate(item, mediaType);
-
-  if (date.length < 4) {
-    return 0;
-  }
-
-  return Number(date.substring(0, 4)) || 0;
-}
-
-function mediaTitle(item, mediaType) {
-  if (mediaType === "tv") {
-    return String(
-      item?.name ??
-        item?.original_name ??
-        "",
+  const brazil =
+    results.find(
+      (item) =>
+        item.iso_3166_1 === "BR" &&
+        typeof item.rating === "string" &&
+        item.rating.trim() !== "",
     );
+
+  let certification =
+    brazil?.rating?.trim() ?? "";
+
+  if (!certification) {
+    return "Não informada";
   }
 
-  return String(
-    item?.title ??
-      item?.original_title ??
-      "",
-  );
-}
-
-function mediaOriginalTitle(item, mediaType) {
-  if (mediaType === "tv") {
-    return String(
-      item?.original_name ??
-        item?.name ??
-        "",
-    );
+  if (
+    certification.toUpperCase() === "L"
+  ) {
+    return "Livre";
   }
 
-  return String(
-    item?.original_title ??
-      item?.title ??
-      "",
-  );
+  certification =
+    certification
+      .replace(/[^0-9A-Za-z+]/g, "")
+      .trim();
+
+  if (/^\d+$/.test(certification)) {
+    return `${certification} anos`;
+  }
+
+  return certification || "Não informada";
 }
 
-function normalizeMediaItem(item, mediaType) {
-  const title = mediaTitle(item, mediaType);
-
-  const originalTitle =
-    mediaOriginalTitle(item, mediaType);
-
-  const releaseDate =
-    mediaDate(item, mediaType);
+function buildWatchObject(
+  providersData,
+) {
+  const brazil =
+    providersData?.results?.BR ?? {};
 
   return {
-    ...item,
+    tmdbLink:
+      brazil.link ?? "",
 
-    media_type: mediaType,
-    mediaType,
+    streaming:
+      normalizeProviders(
+        brazil.flatrate,
+      ),
 
-    title,
-    original_title: originalTitle,
-    release_date: releaseDate,
+    free:
+      normalizeProviders(
+        brazil.free,
+      ),
 
-    year:
-      releaseDate.length >= 4
-        ? Number(releaseDate.substring(0, 4)) || 0
-        : 0,
+    ads:
+      normalizeProviders(
+        brazil.ads,
+      ),
 
-    name:
-      mediaType === "tv"
-        ? item?.name ?? title
-        : item?.name,
+    rent:
+      normalizeProviders(
+        brazil.rent,
+      ),
 
-    original_name:
-      mediaType === "tv"
-        ? item?.original_name ?? originalTitle
-        : item?.original_name,
-
-    first_air_date:
-      mediaType === "tv"
-        ? item?.first_air_date ?? releaseDate
-        : item?.first_air_date,
+    buy:
+      normalizeProviders(
+        brazil.buy,
+      ),
   };
 }
 
-function normalizeMediaPreference(value) {
-  const normalized = normalizeText(value);
+function watchHasOptions(watch) {
+  return Boolean(
+    watch &&
+      (
+        watch.streaming?.length > 0 ||
+        watch.free?.length > 0 ||
+        watch.ads?.length > 0 ||
+        watch.rent?.length > 0 ||
+        watch.buy?.length > 0
+      ),
+  );
+}
 
+function serializeSeasonSummary(season) {
+  const airDate =
+    String(
+      season?.air_date ?? "",
+    );
+
+  return {
+    id:
+      season?.id ?? null,
+
+    number:
+      Number(
+        season?.season_number ?? 0,
+      ),
+
+    name:
+      season?.name ?? "",
+
+    overview:
+      season?.overview ?? "",
+
+    airDate,
+
+    year:
+      airDate.length >= 4
+        ? Number(
+            airDate.substring(0, 4),
+          ) || 0
+        : 0,
+
+    episodeCount:
+      Number(
+        season?.episode_count ?? 0,
+      ),
+
+    rating:
+      Number(
+        season?.vote_average ?? 0,
+      ),
+
+    poster:
+      season?.poster_path
+        ? `https://image.tmdb.org/t/p/w500${season.poster_path}`
+        : "",
+
+    isUpcoming:
+      isFutureDate(airDate),
+  };
+}
+
+function serializeEpisode(episode) {
+  const airDate =
+    String(
+      episode?.air_date ?? "",
+    );
+
+  return {
+    id:
+      episode?.id ?? null,
+
+    number:
+      Number(
+        episode?.episode_number ?? 0,
+      ),
+
+    seasonNumber:
+      Number(
+        episode?.season_number ?? 0,
+      ),
+
+    name:
+      episode?.name ?? "",
+
+    overview:
+      episode?.overview ?? "",
+
+    airDate,
+
+    runtime:
+      Number(
+        episode?.runtime ?? 0,
+      ),
+
+    rating:
+      Number(
+        episode?.vote_average ?? 0,
+      ),
+
+    voteCount:
+      Number(
+        episode?.vote_count ?? 0,
+      ),
+
+    still:
+      episode?.still_path
+        ? `https://image.tmdb.org/t/p/w780${episode.still_path}`
+        : "",
+
+    isUpcoming:
+      isFutureDate(airDate),
+  };
+}
+
+function normalizeSeriesListItem(series) {
+  return normalizeMediaItem(
+    series,
+    "tv",
+  );
+}
+
+function sortMatchItems(first, second) {
   if (
-    normalized === "serie" ||
-    normalized === "series" ||
-    normalized === "tv" ||
-    normalized === "show"
+    second.compatibility !==
+    first.compatibility
   ) {
-    return "tv";
+    return (
+      second.compatibility -
+      first.compatibility
+    );
   }
 
-  if (
-    normalized === "tanto faz" ||
-    normalized === "ambos" ||
-    normalized === "both" ||
-    normalized === "filme ou serie" ||
-    normalized === "filme ou série"
-  ) {
-    return "both";
+  const ratingDiff =
+    Number(
+      second.item?.vote_average ?? 0,
+    ) -
+    Number(
+      first.item?.vote_average ?? 0,
+    );
+
+  if (ratingDiff !== 0) {
+    return ratingDiff;
   }
 
-  return "movie";
+  return (
+    Number(
+      second.item?.popularity ?? 0,
+    ) -
+    Number(
+      first.item?.popularity ?? 0,
+    )
+  );
 }
 
-function genreIdsForSelection(genre, mediaType) {
-  if (!genre) {
-    return [];
-  }
-
-  if (mediaType === "tv") {
-    return Array.isArray(TV_GENRE_IDS[genre])
-      ? TV_GENRE_IDS[genre]
-      : [];
-  }
-
-  const movieId = GENRE_IDS[genre];
-
-  return movieId ? [movieId] : [];
-}
-
-function moodIdsForSelection(mood, mediaType) {
-  if (!mood) {
-    return [];
-  }
-
-  const map =
-    mediaType === "tv"
-      ? TV_MOOD_GENRES
-      : MOOD_GENRES;
-
-  return Array.isArray(map[mood])
-    ? map[mood]
-    : [];
-}
-
-function featureIdsForSelection(feature, mediaType) {
-  if (!feature) {
-    return [];
-  }
-
-  const map =
-    mediaType === "tv"
-      ? TV_FEATURE_GENRES
-      : FEATURE_GENRES;
-
-  return Array.isArray(map[feature])
-    ? map[feature]
-    : [];
-}
-
-function companyIdsForSelection(company, mediaType) {
-  if (!company) {
-    return [];
-  }
-
-  const map =
-    mediaType === "tv"
-      ? TV_COMPANY_GENRES
-      : COMPANY_GENRES;
-
-  return Array.isArray(map[company])
-    ? map[company]
-    : [];
-}
-
-function matchesEraForMedia(
-  item,
-  mediaType,
-  era,
-  currentYear,
+function chooseMixedResults(
+  scored,
+  limit = 12,
 ) {
-  const year = mediaYear(item, mediaType);
+  const movies =
+    scored
+      .filter(
+        (entry) =>
+          entry.mediaType === "movie",
+      )
+      .sort(sortMatchItems);
 
-  if (!era || era === "Tanto faz") {
-    return true;
+  const series =
+    scored
+      .filter(
+        (entry) =>
+          entry.mediaType === "tv",
+      )
+      .sort(sortMatchItems);
+
+  // Garante variedade quando o usuário escolhe "Tanto faz":
+  // tenta reservar pelo menos quatro vagas para cada tipo,
+  // sem sacrificar o restante do ranking.
+  const selected = [];
+  const selectedKeys = new Set();
+
+  function add(entry) {
+    if (!entry) {
+      return;
+    }
+
+    const key =
+      `${entry.mediaType}:${entry.item?.id}`;
+
+    if (
+      !entry.item?.id ||
+      selectedKeys.has(key)
+    ) {
+      return;
+    }
+
+    selectedKeys.add(key);
+    selected.push(entry);
   }
 
-  if (year <= 0) {
-    return false;
+  const minimumEach =
+    Math.min(
+      4,
+      Math.floor(limit / 2),
+    );
+
+  for (
+    let index = 0;
+    index < minimumEach;
+    index++
+  ) {
+    add(movies[index]);
+    add(series[index]);
   }
 
-  if (era === "Lançamentos") {
-    return year >= currentYear - 3;
+  const remaining =
+    scored
+      .slice()
+      .sort(sortMatchItems);
+
+  for (const entry of remaining) {
+    if (
+      selected.length >= limit
+    ) {
+      break;
+    }
+
+    add(entry);
   }
 
-  if (era === "Recentes") {
-    return year >= currentYear - 15;
-  }
-
-  if (era === "Clássicos") {
-    return year < currentYear - 15;
-  }
-
-  return true;
+  return selected
+    .sort(sortMatchItems)
+    .slice(0, limit);
 }
+
+
+export default async (request, context) => {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders,
+    });
+  }
+
+  const token = Netlify.env.get("TMDB_READ_TOKEN");
+
+  if (!token) {
+    return jsonResponse(
+      {
+        error:
+          "TMDB_READ_TOKEN não foi encontrado no Netlify.",
+      },
+      500,
+    );
+  }
+
+  const requestUrl = new URL(request.url);
+
+  const type =
+    requestUrl.searchParams.get("type") ?? "popular";
+
+  const page =
+    requestUrl.searchParams.get("page") ?? "1";
+
+  const id =
+    requestUrl.searchParams.get("id");
+
+  async function tmdbFetch(path, params = {}) {
+    const url = new URL(
+      `https://api.themoviedb.org/3${path}`,
+    );
+
+    for (const [key, value] of Object.entries(params)) {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== ""
+      ) {
+        url.searchParams.set(
+          key,
+          String(value),
+        );
+      }
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+
+      throw new Error(
+        `TMDB respondeu ${response.status}: ${details}`,
+      );
+    }
+
+    return response.json();
+  }
+
+  try {
+    // ========================================================
+    // FILMES POPULARES
+    // ========================================================
+
+    if (type === "popular") {
+      const data = await tmdbFetch(
+        "/movie/popular",
+        {
+          language: "pt-BR",
+          page,
+        },
+      );
+
+      return jsonResponse({
+        success: true,
+        type: "popular",
+        page: data.page,
+        totalPages: data.total_pages,
+        totalResults: data.total_results,
+        movies: data.results,
+      });
+    }
+
+    // ========================================================
+    // FILMES EM CARTAZ NO BRASIL
+    // ========================================================
+
+    if (type === "now_playing") {
+      const data =
+        await tmdbFetch(
+          "/movie/now_playing",
+          {
+            language: "pt-BR",
+            region: "BR",
+            page,
+          },
+        );
+
+      const movies =
+        Array.isArray(data.results)
+          ? data.results.filter(
+              (movie) =>
+                movie?.id &&
+                movie.adult !== true,
+            )
+          : [];
+
+      return jsonResponse({
+        success: true,
+        type: "now_playing",
+        page:
+          data.page ?? 1,
+        totalPages:
+          data.total_pages ?? 0,
+        totalResults:
+          data.total_results ?? 0,
+        movies,
+      });
+    }
+
+    // ========================================================
+    // PESQUISA DE FILMES
+    // ========================================================
+
+    if (type === "search") {
+      const query =
+        requestUrl.searchParams
+          .get("query")
+          ?.trim() ?? "";
+
+      if (query.length < 2) {
+        return jsonResponse({
+          success: true,
+          type: "search",
+          page: 1,
+          totalPages: 0,
+          totalResults: 0,
+          movies: [],
+        });
+      }
+
+      const data =
+        await tmdbFetch(
+          "/search/movie",
+          {
+            language: "pt-BR",
+            query,
+            include_adult: false,
+            page,
+          },
+        );
+
+      const movies =
+        Array.isArray(data.results)
+          ? data.results.filter(
+              (movie) =>
+                movie?.id &&
+                movie.adult !== true,
+            )
+          : [];
+
+      return jsonResponse({
+        success: true,
+        type: "search",
+        page:
+          data.page ?? 1,
+        totalPages:
+          data.total_pages ?? 0,
+        totalResults:
+          data.total_results ?? 0,
+        movies,
+      });
+    }
+
+    // ========================================================
+    // DETALHES DE UM FILME
+    // ========================================================
+
+    if (type === "details") {
+      if (!id || !/^\d+$/.test(id)) {
+        return jsonResponse(
+          {
+            error:
+              "Informe um ID de filme válido.",
+          },
+          400,
+        );
+      }
+
+      const [
+        details,
+        releaseDates,
+        watchProviders,
+        videosPt,
+        videosEn,
+      ] = await Promise.all([
+        tmdbFetch(`/movie/${id}`, {
+          language: "pt-BR",
+        }),
+
+        tmdbFetch(
+          `/movie/${id}/release_dates`,
+        ),
+
+        tmdbFetch(
+          `/movie/${id}/watch/providers`,
+        ),
+
+        tmdbFetch(`/movie/${id}/videos`, {
+          language: "pt-BR",
+        }),
+
+        tmdbFetch(`/movie/${id}/videos`, {
+          language: "en-US",
+        }),
+      ]);
+
+      let trailer =
+        getBestTrailer(videosPt);
+
+      if (!trailer) {
+        trailer = getBestTrailer(videosEn);
+      }
+
+      const certification =
+        getBrazilCertification(releaseDates);
+
+      const brazilProviders =
+        watchProviders.results?.BR ?? {};
+
+      const streaming =
+        normalizeProviders(
+          brazilProviders.flatrate,
+        );
+
+      const free =
+        normalizeProviders(
+          brazilProviders.free,
+        );
+
+      const ads =
+        normalizeProviders(
+          brazilProviders.ads,
+        );
+
+      const rent =
+        normalizeProviders(
+          brazilProviders.rent,
+        );
+
+      const buy =
+        normalizeProviders(
+          brazilProviders.buy,
+        );
+
+      return jsonResponse({
+        success: true,
+        type: "details",
+        movie: {
+          id: details.id,
+
+          title: details.title ?? "",
+
+          originalTitle:
+            details.original_title ?? "",
+
+          overview:
+            details.overview ?? "",
+
+          releaseDate:
+            details.release_date ?? "",
+
+          year:
+            details.release_date &&
+            details.release_date.length >= 4
+              ? Number(
+                  details.release_date.substring(
+                    0,
+                    4,
+                  ),
+                )
+              : 0,
+
+          rating:
+            details.vote_average ?? 0,
+
+          voteCount:
+            details.vote_count ?? 0,
+
+          runtime:
+            details.runtime ?? 0,
+
+          genres: Array.isArray(
+            details.genres,
+          )
+            ? details.genres.map(
+                (genre) => genre.name,
+              )
+            : [],
+
+          poster: details.poster_path
+            ? `https://image.tmdb.org/t/p/w500${details.poster_path}`
+            : "",
+
+          backdrop: details.backdrop_path
+            ? `https://image.tmdb.org/t/p/original${details.backdrop_path}`
+            : "",
+
+          certification,
+
+          trailer,
+
+          watch: {
+            tmdbLink:
+              brazilProviders.link ?? "",
+
+            streaming,
+
+            free,
+
+            ads,
+
+            rent,
+
+            buy,
+          },
+        },
+      });
+    }
+
+
     // ========================================================
     // SÉRIES POPULARES
     // ========================================================
@@ -2248,6 +2363,8 @@ function matchesEraForMedia(
         },
       });
     }
+
+
     // ========================================================
     // MOVIE MATCH — FILME / SÉRIE / TANTO FAZ
     // ========================================================
@@ -2423,8 +2540,8 @@ function matchesEraForMedia(
             ] = `${currentYear - 16}-12-31`;
           }
 
-          // Para séries, duração = duração aproximada
-          // de um episódio.
+          // Para séries a duração representa, na prática,
+          // a duração aproximada de um episódio.
           if (duration === "Curto") {
             params[
               "with_runtime.lte"
@@ -2823,9 +2940,8 @@ function matchesEraForMedia(
 
         streamingFilterApplied,
 
-        // Continua chamado "movies" por enquanto
-        // para não quebrar o Flutter atual.
-        // Aqui dentro agora pode vir filme OU série.
+        // Mantemos "movies" por compatibilidade com o Flutter
+        // atual. Ele passará a conter filmes OU séries.
         movies:
           enriched,
 
