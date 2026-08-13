@@ -2399,20 +2399,6 @@ export default async (request, context) => {
     // ===========================================================
 
     if (type === "streaming_providers") {
-      const preferredProviders = [
-        "Netflix",
-        "Prime Video",
-        "Disney+",
-        "Max",
-        "Globoplay",
-        "Apple TV+",
-        "Paramount+",
-        "Crunchyroll",
-        "MUBI",
-        "Universal+",
-        "Claro tv+",
-      ];
-
       const [movieProviderData, tvProviderData] =
         await Promise.all([
           tmdbFetch("/watch/providers/movie", {
@@ -2435,54 +2421,83 @@ export default async (request, context) => {
           ? tvProviderData.results
           : [];
 
-      const providers = [];
+      // Não existe mais uma lista limitada de streamings escolhidos à mão.
+      // Reunimos TODOS os provedores que a TMDB informa para o Brasil.
+      const providersByName = new Map();
 
-      for (const displayName of preferredProviders) {
-        const movieMatches =
-          movieProviders.filter((provider) =>
-            providerMatchesDirectStreaming(
-              displayName,
-              provider.provider_name,
-            ),
-          );
+      function addProvider(provider, mediaType) {
+        const id = Number(provider?.provider_id);
+        const name = String(provider?.provider_name ?? "").trim();
 
-        const tvMatches =
-          tvProviders.filter((provider) =>
-            providerMatchesDirectStreaming(
-              displayName,
-              provider.provider_name,
-            ),
-          );
-
-        if (
-          movieMatches.length === 0 &&
-          tvMatches.length === 0
-        ) {
-          continue;
+        if (!Number.isInteger(id) || id <= 0 || !name) {
+          return;
         }
 
-        const representative =
-          movieMatches[0] ?? tvMatches[0];
+        const key = normalizeText(name);
 
-        providers.push({
-          name: displayName,
-          movieProviderIds: uniqueStrings(
-            movieMatches.map((provider) =>
-              String(provider.provider_id),
-            ),
-          ).map(Number),
-          tvProviderIds: uniqueStrings(
-            tvMatches.map((provider) =>
-              String(provider.provider_id),
-            ),
-          ).map(Number),
-          logo: representative?.logo_path
-            ? `https://image.tmdb.org/t/p/w185${representative.logo_path}`
+        if (!key) {
+          return;
+        }
+
+        const current = providersByName.get(key) ?? {
+          name,
+          originalName: name,
+          movieProviderIds: [],
+          tvProviderIds: [],
+          logo: provider?.logo_path
+            ? `https://image.tmdb.org/t/p/w185${provider.logo_path}`
             : "",
-          originalName:
-            representative?.provider_name ?? displayName,
-        });
+          priority: Number(provider?.display_priority ?? 9999),
+        };
+
+        const target =
+          mediaType === "tv"
+            ? current.tvProviderIds
+            : current.movieProviderIds;
+
+        if (!target.includes(id)) {
+          target.push(id);
+        }
+
+        if (!current.logo && provider?.logo_path) {
+          current.logo =
+            `https://image.tmdb.org/t/p/w185${provider.logo_path}`;
+        }
+
+        current.priority = Math.min(
+          current.priority,
+          Number(provider?.display_priority ?? 9999),
+        );
+
+        providersByName.set(key, current);
       }
+
+      for (const provider of movieProviders) {
+        addProvider(provider, "movie");
+      }
+
+      for (const provider of tvProviders) {
+        addProvider(provider, "tv");
+      }
+
+      const providers = [...providersByName.values()]
+        .map((provider) => ({
+          ...provider,
+          movieProviderIds:
+            provider.movieProviderIds.sort((a, b) => a - b),
+          tvProviderIds:
+            provider.tvProviderIds.sort((a, b) => a - b),
+        }))
+        .sort((first, second) => {
+          if (first.priority !== second.priority) {
+            return first.priority - second.priority;
+          }
+
+          return first.name.localeCompare(
+            second.name,
+            "pt-BR",
+          );
+        });
 
       return jsonResponse({
         success: true,
@@ -2530,12 +2545,55 @@ export default async (request, context) => {
           ) || 1,
         );
 
+      function providerIdsFromQuery(parameterName) {
+        const raw =
+          requestUrl.searchParams.get(parameterName) ?? "";
+
+        return uniqueStrings(
+          raw
+            .split(",")
+            .map((value) => value.trim())
+            .filter((value) => /^\d+$/.test(value)),
+        )
+          .map(Number)
+          .filter((value) => value > 0);
+      }
+
+      const selectedMovieProviderIds =
+        providerIdsFromQuery("movieProviderIds");
+
+      const selectedTvProviderIds =
+        providerIdsFromQuery("tvProviderIds");
+
+      const movieProviderIdsWereSent =
+        requestUrl.searchParams.has("movieProviderIds");
+
+      const tvProviderIdsWereSent =
+        requestUrl.searchParams.has("tvProviderIds");
+
       const wantedMediaTypes =
         mediaPreference === "both"
           ? ["movie", "tv"]
           : [mediaPreference];
 
       async function providerIdsForCatalog(mediaType) {
+        const selectedIds =
+          mediaType === "tv"
+            ? selectedTvProviderIds
+            : selectedMovieProviderIds;
+
+        const idsWereSent =
+          mediaType === "tv"
+            ? tvProviderIdsWereSent
+            : movieProviderIdsWereSent;
+
+        // A tela já recebeu os IDs exatos da lista de provedores.
+        // Usá-los evita confundir nomes parecidos e permite abrir
+        // corretamente qualquer streaming retornado pela TMDB.
+        if (idsWereSent) {
+          return selectedIds;
+        }
+
         const providerData =
           await tmdbFetch(
             mediaType === "tv"
