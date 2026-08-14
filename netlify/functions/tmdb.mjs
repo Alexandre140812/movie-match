@@ -20,6 +20,10 @@ const GENRE_IDS = {
   "Mistério": 9648,
   "Romance": 10749,
   "Ficção": 878,
+  "Ficção científica": 878,
+  "Ação e aventura": 12,
+  "Ficção e fantasia": 14,
+  "Guerra e política": 10752,
   "Suspense": 53,
   "Guerra": 10752,
   "Faroeste": 37,
@@ -70,6 +74,12 @@ const TV_GENRE_IDS = {
   "Mistério": [9648],
   "Romance": [18, 35],
   "Ficção": [10765],
+  "Ficção científica": [10765],
+  "Ação e aventura": [10759],
+  "Ficção e fantasia": [10765],
+  "Talk show": [10767],
+  "Notícias": [10763],
+  "Guerra e política": [10768],
   "Suspense": [9648, 80, 18],
   "Guerra": [10768],
   "Faroeste": [37],
@@ -2508,6 +2518,177 @@ export default async (request, context) => {
     }
 
     // ===========================================================
+    // CATÁLOGO COMPLETO DE UM GÊNERO
+    // ===========================================================
+
+    if (type === "genre_catalog") {
+      const genre =
+        (requestUrl.searchParams.get("genre") ?? "").trim();
+
+      if (!genre) {
+        return jsonResponse(
+          {
+            success: false,
+            error: "O gênero não foi informado.",
+          },
+          400,
+        );
+      }
+
+      const mediaPreference =
+        normalizeMediaPreference(
+          requestUrl.searchParams.get("media") ?? "both",
+        );
+
+      const searchQuery =
+        (requestUrl.searchParams.get("query") ?? "").trim();
+
+      const requestedPage = Math.min(
+        500,
+        Math.max(
+          1,
+          Number(requestUrl.searchParams.get("page") ?? 1) || 1,
+        ),
+      );
+
+      const wantedMediaTypes =
+        mediaPreference === "both"
+          ? ["movie", "tv"]
+          : [mediaPreference];
+
+      const validMediaTypes = wantedMediaTypes.filter((mediaType) => {
+        return genreIdsForSelection(genre, mediaType).length > 0;
+      });
+
+      if (validMediaTypes.length === 0) {
+        return jsonResponse({
+          success: true,
+          type: "genre_catalog",
+          genre,
+          mediaPreference,
+          query: searchQuery,
+          page: requestedPage,
+          hasMore: false,
+          totalResults: 0,
+          results: [],
+        });
+      }
+
+      const groups = await Promise.all(
+        validMediaTypes.map(async (mediaType) => {
+          const genreIds = genreIdsForSelection(genre, mediaType);
+
+          const path =
+            searchQuery.length >= 2
+              ? mediaType === "tv"
+                ? "/search/tv"
+                : "/search/movie"
+              : mediaType === "tv"
+                ? "/discover/tv"
+                : "/discover/movie";
+
+          const params = {
+            language: "pt-BR",
+            include_adult: false,
+            page: requestedPage,
+          };
+
+          if (searchQuery.length >= 2) {
+            params.query = searchQuery;
+          } else {
+            params.sort_by = "popularity.desc";
+            params.with_genres = genreIds.join("|");
+
+            if (mediaType === "movie") {
+              params.include_video = false;
+            } else {
+              params.include_null_first_air_dates = false;
+            }
+          }
+
+          const data = await tmdbFetch(path, params);
+
+          const rawResults = Array.isArray(data.results)
+            ? data.results
+            : [];
+
+          const filtered = rawResults.filter((item) => {
+            if (!item?.id || item.adult === true) {
+              return false;
+            }
+
+            if (searchQuery.length < 2) {
+              return true;
+            }
+
+            const itemGenreIds = genreIdsFromMovie(item);
+
+            return hasIntersection(itemGenreIds, genreIds);
+          });
+
+          return {
+            mediaType,
+            items: filtered.map((item) =>
+              normalizeMediaItem(item, mediaType),
+            ),
+            totalPages: Math.min(500, Number(data.total_pages ?? 1) || 1),
+            totalResults: Number(data.total_results ?? 0) || 0,
+          };
+        }),
+      );
+
+      const mixed = [];
+      const biggestGroup = Math.max(
+        0,
+        ...groups.map((group) => group.items.length),
+      );
+
+      for (let index = 0; index < biggestGroup; index++) {
+        for (const group of groups) {
+          const item = group.items[index];
+
+          if (item) {
+            mixed.push(item);
+          }
+        }
+      }
+
+      const unique = new Map();
+
+      for (const item of mixed) {
+        const key = `${item.mediaType}:${item.id}`;
+
+        if (item?.id && !unique.has(key)) {
+          unique.set(key, item);
+        }
+      }
+
+      const results = [...unique.values()];
+      const hasMore = groups.some((group) => {
+        return requestedPage < group.totalPages;
+      });
+
+      const totalResults =
+        searchQuery.length >= 2
+          ? results.length
+          : groups.reduce((total, group) => {
+              return total + group.totalResults;
+            }, 0);
+
+      return jsonResponse({
+        success: true,
+        type: "genre_catalog",
+        genre,
+        mediaPreference,
+        query: searchQuery,
+        page: requestedPage,
+        hasMore,
+        totalResults,
+        results,
+      });
+    }
+
+    // ===========================================================
     // CATÁLOGO DE UM STREAMING
     // ===========================================================
 
@@ -3448,3 +3629,4 @@ export default async (request, context) => {
     );
   }
 };
+
