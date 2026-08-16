@@ -3,16 +3,15 @@ const MANIFEST = 'flutter-app-manifest';
 const TEMP = 'flutter-temp-cache';
 const CACHE_NAME = 'flutter-app-cache';
 
-const RESOURCES = {"assets/AssetManifest.bin": "85a10c9ff11f0a7e6114923d86c00589",
-"assets/AssetManifest.bin.json": "4444c4119f14e70b5bae0c5ddb640569",
+const RESOURCES = {"assets/AssetManifest.bin": "20e3c734817ff4ef8481d0b58c7fbb2a",
+"assets/AssetManifest.bin.json": "6fd80c3ae7f66ab88ed37643bca29d28",
 "assets/assets/images/batman.jpg": "bcb79252ffee4643160b78300ccc523d",
 "assets/assets/images/interestelar.jpg": "ba26a3fc831a0bb87736889e02172657",
 "assets/assets/images/spiderman.webp": "0c644753a0f4d2d9cc1772f18563d34b",
 "assets/assets/images/toystory.jpg": "5133497084f35de9633c2131a8b3c67e",
-"assets/FontManifest.json": "dc3d03800ccca4601324923c0b1d6d57",
-"assets/fonts/MaterialIcons-Regular.otf": "870451143a127de4a09582a1dfa71e01",
-"assets/NOTICES": "f8ac0f0c1f3ae5ae0359d99e72de9ab1",
-"assets/packages/cupertino_icons/assets/CupertinoIcons.ttf": "33b7d9392238c04c131b6ce224e13711",
+"assets/FontManifest.json": "7b2a36307916a9721811788013e65289",
+"assets/fonts/MaterialIcons-Regular.otf": "0c1dda72b1760ee05a6d3f7ed3da68e3",
+"assets/NOTICES": "dccac2f4f75590ee0cc938de6e24f005",
 "assets/shaders/ink_sparkle.frag": "ecc85a2e95f5e9f53123dcaf8cb9b6ce",
 "assets/shaders/stretch_effect.frag": "40d68efbbf360632f614c731219e95f0",
 "canvaskit/canvaskit.js": "8331fe38e66b3a898c4f37648aaf7ee2",
@@ -29,14 +28,14 @@ const RESOURCES = {"assets/AssetManifest.bin": "85a10c9ff11f0a7e6114923d86c00589
 "canvaskit/skwasm_heavy.wasm": "b0be7910760d205ea4e011458df6ee01",
 "favicon.png": "5dcef449791fa27946b3d35ad8803796",
 "flutter.js": "24bc71911b75b5f8135c949e27a2984e",
-"flutter_bootstrap.js": "85dc8904e0e033c7c98fd9dc88f7246b",
+"flutter_bootstrap.js": "a3b0600381b9603733fd6e5f29d28e0b",
 "icons/Icon-192.png": "ac9a721a12bbc803b44f645561ecb1e1",
 "icons/Icon-512.png": "96e752610906ba2a93c65f8abe1645f1",
 "icons/Icon-maskable-192.png": "c457ef57daa1d16f64b27b786ec2ea3c",
 "icons/Icon-maskable-512.png": "301a7604d45b3e739efc881eb04896ea",
 "index.html": "ff76aa7de1f2349e4f7da5cf35db27da",
 "/": "ff76aa7de1f2349e4f7da5cf35db27da",
-"main.dart.js": "e7a9ad60d2017419b0570256e048f094",
+"main.dart.js": "30c08696701761d4fc1399ec1e81bf5a",
 "manifest.json": "287b692013f48f78d11473b39e81d021",
 "version.json": "2113bda858cb0c2d15bfa919cedf3a5b"};
 // The application shell files that are downloaded before a service worker can
